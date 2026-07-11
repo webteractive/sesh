@@ -110,6 +110,17 @@ final class AppModel {
     /// Renders the whole store to the managed file and ensures the Include.
     /// Store is the source of truth, so failures only warn (file is rebuildable).
     func exportNow() {
+        // Defense-in-depth: if the managed path somehow aliases the real
+        // config (e.g. a stray/mistyped Settings entry), refuse to export —
+        // exporter.write would overwrite the user's actual ~/.ssh/config
+        // with only the store's rendered hosts, destroying everything else
+        // in it (Match blocks, other Includes, manually-added hosts).
+        let expandedManaged = (managedPath as NSString).expandingTildeInPath
+        let expandedConfig = ((configPath ?? ConfigPathStore.defaultSuggestion) as NSString).expandingTildeInPath
+        guard expandedManaged != expandedConfig else {
+            pendingError = "Managed file path can't be your main ~/.ssh/config."
+            return
+        }
         do {
             let entries = try context.fetch(FetchDescriptor<HostEntry>(sortBy: [SortDescriptor(\.createdAt)]))
                 .map { RenderableHost(host: $0.host, properties: $0.properties) }

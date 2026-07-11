@@ -57,6 +57,17 @@ public struct SSHConfigWriter {
     }
 
     public func write(_ content: String, toPath path: String) throws {
+        guard let data = content.data(using: .utf8) else {
+            throw CocoaError(.fileWriteInapplicableStringEncoding)
+        }
+        try writeData(data, toPath: path)
+    }
+
+    /// Byte-level counterpart to `write(_:toPath:)`, for callers (like
+    /// `IncludeManager`) that need to write raw bytes without decoding them
+    /// through a Swift `String` first — e.g. to preserve a non-UTF-8 config
+    /// verbatim while only prepending ASCII content to it.
+    public func writeData(_ data: Data, toPath path: String) throws {
         let expanded = (path as NSString).expandingTildeInPath
         let fm = FileManager.default
 
@@ -78,10 +89,6 @@ public struct SSHConfigWriter {
                 withIntermediateDirectories: true,
                 attributes: [.posixPermissions: 0o700]
             )
-        }
-
-        guard let data = content.data(using: .utf8) else {
-            throw CocoaError(.fileWriteInapplicableStringEncoding)
         }
 
         let tmpPath = destination + ".tmp-" + UUID().uuidString

@@ -9,6 +9,8 @@ struct SettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var path = ConfigPathStore.defaultSuggestion
     @State private var error: String?
+    @State private var managedPathDraft = ""
+    @State private var managedPathError: String?
 
     var body: some View {
         @Bindable var model = model
@@ -22,15 +24,22 @@ struct SettingsSheet: View {
             TextField("Config path", text: $path, prompt: Text("~/.ssh/config"))
                 .font(.body.monospaced())
 
-            TextField("Managed file path", text: $model.managedPath, prompt: Text("~/.ssh/sesh.conf"))
+            TextField("Managed file path", text: $managedPathDraft, prompt: Text("~/.ssh/sesh.conf"))
                 .font(.body.monospaced())
+                .onSubmit { commitManagedPath() }
+
+            if let managedPathError {
+                Text(managedPathError).foregroundStyle(.red).font(.callout)
+            }
 
             includeStatusRow
 
             HStack {
                 Button("Import from ~/.ssh/config") {
                     let result = model.importFromConfig()
-                    model.pendingError = "Imported \(result.added) host\(result.added == 1 ? "" : "s") (\(result.skipped) already present)."
+                    if model.pendingError == nil {
+                        model.pendingError = "Imported \(result.added) host\(result.added == 1 ? "" : "s") (\(result.skipped) already present)."
+                    }
                 }
                 Spacer()
             }
@@ -73,8 +82,29 @@ struct SettingsSheet: View {
         .frame(width: 460)
         .onAppear {
             path = model.configPath ?? ConfigPathStore.defaultSuggestion
+            managedPathDraft = model.managedPath
             model.refreshTerminals()
         }
+    }
+
+    /// Commits the managed-path draft on submit: trims, rejects empty, and
+    /// rejects a value that would alias the real config path (which would
+    /// let export overwrite ~/.ssh/config instead of the managed fragment).
+    private func commitManagedPath() {
+        let trimmed = managedPathDraft.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else {
+            managedPathError = "Managed file path is required."
+            return
+        }
+        let expandedManaged = (trimmed as NSString).expandingTildeInPath
+        let expandedConfig = (path as NSString).expandingTildeInPath
+        guard expandedManaged != expandedConfig else {
+            managedPathError = "Managed file path can't be your main ~/.ssh/config."
+            return
+        }
+        managedPathError = nil
+        model.managedPath = trimmed
+        managedPathDraft = trimmed
     }
 
     @ViewBuilder

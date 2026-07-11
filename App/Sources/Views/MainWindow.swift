@@ -309,6 +309,8 @@ struct MainWindow: View {
     /// via the same alert channel used for errors.
     private func importNow() {
         let result = model.importFromConfig()
-        model.pendingError = "Imported \(result.added) host\(result.added == 1 ? "" : "s") (\(result.skipped) already present)."
+        if model.pendingError == nil {
+            model.pendingError = "Imported \(result.added) host\(result.added == 1 ? "" : "s") (\(result.skipped) already present)."
+        }
     }
 }

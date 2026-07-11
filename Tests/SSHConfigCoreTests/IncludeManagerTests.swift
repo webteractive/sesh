@@ -66,3 +66,36 @@ private func tempDir() -> String {
     let text = try String(contentsOfFile: config, encoding: .utf8)
     #expect(text.components(separatedBy: "Include ~/.ssh/sesh.conf").count == 2) // exactly one occurrence
 }
+
+/// A non-UTF-8 byte (e.g. latin-1) previously made `try? String(contentsOfFile:
+/// encoding: .utf8)` return nil, which the old code coalesced to "", making
+/// the "already present?" check pass on an empty string and writing ONLY the
+/// Include line — destroying the user's config. ensureInclude must instead
+/// preserve the original bytes verbatim and only prepend the Include line.
+@Test func ensureIncludePreservesLatin1Config() throws {
+    let dir = tempDir(); defer { try? FileManager.default.removeItem(atPath: dir) }
+    let config = dir + "/config"
+    // 0xE9 is not valid UTF-8 on its own, but decodes fine as latin-1 (é).
+    var raw = Data("# caf".utf8)
+    raw.append(0xE9)
+    raw.append(contentsOf: Data("\nHost a\n    User me\n".utf8))
+    try raw.write(to: URL(fileURLWithPath: config))
+    let mgr = IncludeManager()
+
+    let added1 = try mgr.ensureInclude(managedPath: "~/.ssh/sesh.conf", configPath: config)
+    #expect(added1 == true)
+
+    let after1 = try Data(contentsOf: URL(fileURLWithPath: config))
+    #expect(after1.contains(0xE9))                    // original byte preserved
+    let text1 = String(data: after1, encoding: .isoLatin1) ?? ""
+    #expect(text1.contains("Host a"))
+    #expect(text1.components(separatedBy: "Include ~/.ssh/sesh.conf").count == 2) // exactly one occurrence
+
+    let added2 = try mgr.ensureInclude(managedPath: "~/.ssh/sesh.conf", configPath: config)
+    #expect(added2 == false)                          // idempotent, no duplicate
+
+    let after2 = try Data(contentsOf: URL(fileURLWithPath: config))
+    #expect(after2.contains(0xE9))                    // still preserved
+    let text2 = String(data: after2, encoding: .isoLatin1) ?? ""
+    #expect(text2.components(separatedBy: "Include ~/.ssh/sesh.conf").count == 2) // still exactly one
+}
