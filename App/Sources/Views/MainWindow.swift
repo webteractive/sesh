@@ -14,7 +14,6 @@ struct MainWindow: View {
     @State private var deleteRequest: HostEntry?
     @State private var multiDeleteRequest: Set<PersistentIdentifier>?
     @State private var showPalette = false
-    @State private var addProfileBase: HostEntry?
     @State private var removeProfileRequest: (entry: HostEntry, members: [HostEntry])?
 
     private var filtered: [HostEntry] {
@@ -98,9 +97,6 @@ struct MainWindow: View {
         }
         .sheet(item: $formMode) { mode in
             HostFormSheet(mode: mode)
-        }
-        .sheet(item: $addProfileBase) { base in
-            AddProfileSheet(base: base)
         }
         .sheet(isPresented: $model.showFirstRun) {
             FirstRunSheet()
@@ -197,7 +193,6 @@ struct MainWindow: View {
            let entry = hosts.first(where: { $0.persistentModelID == id }) {
             HostDetailView(entry: entry,
                            onEdit: { formMode = .edit($0) },
-                           onAddProfile: { addProfileBase = $0 },
                            onRemoveProfile: { profileEntry, members in
                                removeProfileRequest = (entry: profileEntry, members: members)
                            })
@@ -240,7 +235,7 @@ struct MainWindow: View {
             .contextMenu {
                 Button("Edit") { formMode = .edit(entry) }
                 Button("Duplicate") { duplicate(entry) }
-                Button("Add Profile…") { addProfileBase = entry }
+                Button("Add Profile…") { formMode = .edit(entry) }
                 if let group = entry.groupName {
                     Button("Ungroup '\(group)'") { _ = model.ungroupOne(entry, allHosts: hosts) }
                 }

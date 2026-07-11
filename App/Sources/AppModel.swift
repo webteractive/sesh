@@ -224,12 +224,70 @@ final class AppModel {
             HostRow(alias: e.host, groupName: e.groupName,
                     user: e.properties.first("User"),
                     identityFile: e.properties.first("IdentityFile"),
-                    isDefault: e.isDefaultProfile, isConnectable: e.isConnectable)
+                    isDefault: e.isDefaultProfile, isConnectable: e.isConnectable,
+                    displayName: e.displayName)
         })
     }
 
     func entry(forAlias alias: String, in hosts: [HostEntry]) -> HostEntry? {
         hosts.first { $0.host == alias }
+    }
+
+    /// Applies a `HostFormModel` from the new host form: reconciles it against
+    /// the edited group's current members (nil `groupID` = create), inserts,
+    /// updates, or deletes `HostEntry`s per the resulting plan, then exports.
+    /// Returns an error message, or nil on success.
+    func saveHostForm(_ form: HostFormModel, editingGroup groupID: String?) -> String? {
+        if let message = form.validationError() { return message }
+        let all = (try? context.fetch(FetchDescriptor<HostEntry>())) ?? []
+        // Members of the group being edited (by groupName, or the single alias).
+        let members = all.filter { entry in
+            guard let groupID else { return false }
+            return entry.groupName == groupID || entry.host == groupID
+        }
+        // Pass the FULL set of store aliases — the reconciler already excludes
+        // this group's own aliases internally via `existing`, so subtracting
+        // them here would let this group collide with its own former aliases
+        // in ways the reconciler doesn't expect.
+        let plan = HostFormReconciler.plan(
+            form,
+            existing: members.map { ($0.host, $0.properties.first("User")) },
+            allAliases: Set(all.map(\.host)))
+
+        let byAlias = Dictionary(uniqueKeysWithValues: all.map { ($0.host, $0) })
+        // Snapshot for rollback of dirty in-memory fields (SwiftData's
+        // rollback() discards pending inserts/deletes but doesn't reliably
+        // revert property changes on already-persisted objects).
+        let snapshot = members.map { ($0, $0.host, $0.groupName, $0.isDefaultProfile, $0.displayName) }
+
+        for alias in plan.deleteAliases { if let e = byAlias[alias] { context.delete(e) } }
+        for u in plan.upserts {
+            let entry = byAlias[u.alias] ?? {
+                let e = HostEntry(host: u.alias, properties: u.properties, rawBlock: nil)
+                context.insert(e)
+                return e
+            }()
+            entry.host = u.alias
+            entry.properties = u.properties
+            entry.groupName = u.groupName
+            entry.isDefaultProfile = u.isDefault
+            entry.displayName = form.displayName.trimmingCharacters(in: .whitespaces)
+            entry.updatedAt = .now
+        }
+        do {
+            try context.save()
+            exportNow()
+            return nil
+        } catch {
+            context.rollback()
+            for (e, host, group, isDefault, name) in snapshot {
+                e.host = host
+                e.groupName = group
+                e.isDefaultProfile = isDefault
+                e.displayName = name
+            }
+            return error.localizedDescription
+        }
     }
 
     /// Creates a sibling profile under `base`'s group (sharing `groupName`,

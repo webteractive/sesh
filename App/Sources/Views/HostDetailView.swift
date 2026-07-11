@@ -7,7 +7,6 @@ struct HostDetailView: View {
     @Query private var hosts: [HostEntry]
     let entry: HostEntry
     var onEdit: (HostEntry) -> Void = { _ in }
-    var onAddProfile: (HostEntry) -> Void = { _ in }
     var onRemoveProfile: (HostEntry, [HostEntry]) -> Void = { _, _ in }
 
     /// The entry's group (nil when it isn't part of one). Looked up fresh from
@@ -81,7 +80,7 @@ struct HostDetailView: View {
                     }
 
                     Button {
-                        onAddProfile(entry)
+                        onEdit(entry)
                     } label: {
                         Label("Add Profile…", systemImage: "plus.circle")
                     }

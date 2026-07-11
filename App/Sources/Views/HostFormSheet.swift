@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import SwiftData
 import SSHConfigCore
@@ -17,10 +18,10 @@ enum FormMode: Identifiable {
 struct HostFormSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var context
+    @Query private var hosts: [HostEntry]
 
     let mode: FormMode
-    @State private var form = HostFormData()
+    @State private var form = HostFormModel(displayName: "", hostName: "", rows: [CredentialRow(user: "")])
     @State private var error: String?
 
     var body: some View {
@@ -30,30 +31,19 @@ struct HostFormSheet: View {
                 .padding()
 
             Form {
-                TextField("Host", text: $form.host, prompt: Text("myserver"))
-                TextField("HostName", text: $form.hostName, prompt: Text("example.com"))
-                TextField("User", text: $form.user, prompt: Text("root"))
-                TextField("Port", text: $form.port, prompt: Text("22"))
-                TextField("IdentityFile", text: $form.identityFile, prompt: Text("~/.ssh/id_ed25519"))
+                Section {
+                    TextField("Name", text: $form.displayName, prompt: Text("My Server"))
+                    TextField("Host (ip or domain)", text: $form.hostName, prompt: Text("example.com"))
+                }
 
-                Section("Other Options") {
-                    ForEach(form.extras.indices, id: \.self) { i in
-                        HStack {
-                            TextField("Option", text: $form.extras[i].key, prompt: Text("ProxyJump"))
-                                .frame(width: 160)
-                            TextField("Value", text: valueBinding(i), prompt: Text("bastion"))
-                            Button(role: .destructive) {
-                                form.extras.remove(at: i)
-                            } label: {
-                                Image(systemName: "minus.circle")
-                            }
-                            .buttonStyle(.borderless)
-                        }
+                Section("Credentials") {
+                    ForEach(form.rows.indices, id: \.self) { i in
+                        credentialRow(i)
                     }
                     Button {
-                        form.extras.append(SSHProperty(key: "", values: [""]))
+                        form.rows.append(CredentialRow(user: ""))
                     } label: {
-                        Label("Add Option", systemImage: "plus.circle")
+                        Label("Add Credential", systemImage: "plus.circle")
                     }
                     .buttonStyle(.borderless)
                 }
@@ -67,51 +57,95 @@ struct HostFormSheet: View {
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.escape)
-                Button("Save") { save() }.keyboardShortcut(.return).buttonStyle(.borderedProminent)
+                Button("Save") { save() }
+                    .keyboardShortcut(.return)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(form.validationError() != nil)
             }
             .padding()
         }
-        .frame(width: 480, height: 520)
+        .frame(width: 520, height: 560)
         .onAppear {
-            if case .edit(let entry) = mode { form = HostFormData(entry: entry) }
+            if case .edit(let entry) = mode {
+                form = Self.buildForm(for: entry, allHosts: hosts)
+            }
         }
     }
 
     private var isCreate: Bool { if case .create = mode { true } else { false } }
 
-    private func valueBinding(_ i: Int) -> Binding<String> {
-        Binding(
-            get: { form.extras[i].values.first ?? "" },
-            set: { form.extras[i].values = [$0] }
-        )
+    @ViewBuilder
+    private func credentialRow(_ i: Int) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                TextField("User", text: $form.rows[i].user, prompt: Text("root"))
+                TextField("Port", text: $form.rows[i].port, prompt: Text("22"))
+                    .frame(width: 80)
+                Button(role: .destructive) {
+                    form.rows.remove(at: i)
+                } label: {
+                    Image(systemName: "minus.circle")
+                }
+                .buttonStyle(.borderless)
+                .disabled(form.rows.count <= 1)
+            }
+            HStack {
+                TextField("SSH Key", text: $form.rows[i].identityFile, prompt: Text("~/.ssh/id_ed25519"))
+                Button("Choose…") { chooseIdentityFile(for: i) }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func chooseIdentityFile(for index: Int) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser.appending(path: ".ssh")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        form.rows[index].identityFile = url.path
     }
 
     private func save() {
-        let others = (try? context.fetch(FetchDescriptor<HostEntry>())) ?? []
-        var existingHosts = Set(others.map(\.host))
-        if case .edit(let entry) = mode { existingHosts.remove(entry.host) }
-
-        if let message = form.validationError(existingHosts: existingHosts) {
+        let groupID: String? = {
+            if case .edit(let entry) = mode { return entry.groupName ?? entry.host }
+            return nil
+        }()
+        if let message = model.saveHostForm(form, editingGroup: groupID) {
             error = message
-            return
+        } else {
+            dismiss()
         }
-        let host = form.host.trimmingCharacters(in: .whitespaces)
-        switch mode {
-        case .create:
-            context.insert(HostEntry(host: host, properties: form.properties(), rawBlock: nil))
-        case .edit(let entry):
-            entry.host = host
-            entry.properties = form.properties()
-            entry.updatedAt = .now
+    }
+
+    /// Builds a `HostFormModel` from `entry`'s whole group: the display name
+    /// (falling back to the alias), `HostName` from the default member, and
+    /// one `CredentialRow` per member (user/port/identityFile plus any other
+    /// properties preserved as extras). Singleton (ungrouped) entries yield a
+    /// single-row form.
+    private static func buildForm(for entry: HostEntry, allHosts: [HostEntry]) -> HostFormModel {
+        let members = entry.groupName.map { group in allHosts.filter { $0.groupName == group } } ?? [entry]
+        let ordered = members.isEmpty ? [entry] : members
+        let defaultMember = ordered.first { $0.isDefaultProfile } ?? ordered[0]
+        let rest = ordered
+            .filter { $0.persistentModelID != defaultMember.persistentModelID }
+            .sorted { $0.host < $1.host }
+        let orderedMembers = [defaultMember] + rest
+
+        let rows = orderedMembers.map { member -> CredentialRow in
+            let props = member.properties
+            let extras = props.filter { !HostFormData.coreKeys.contains($0.key.lowercased()) }
+            return CredentialRow(
+                user: props.first("User") ?? "",
+                port: props.first("Port") ?? "",
+                identityFile: props.first("IdentityFile") ?? "",
+                extras: extras)
         }
-        do {
-            try context.save()
-        } catch {
-            context.rollback()
-            self.error = error.localizedDescription
-            return
-        }
-        model.exportNow()
-        dismiss()
+
+        return HostFormModel(
+            displayName: entry.displayName ?? entry.host,
+            hostName: defaultMember.properties.first("HostName") ?? "",
+            rows: rows)
     }
 }
