@@ -59,17 +59,22 @@ public struct HostFormPlan: Equatable, Sendable {
 }
 
 public enum HostFormReconciler {
+    /// `allAliases` may (and typically does) contain the group's own current aliases —
+    /// they are always excluded from collision checks below, so the group is free to
+    /// reuse or rearrange its own alias text without self-suffixing.
     public static func plan(_ form: HostFormModel,
                             existing: [(alias: String, user: String?)],
                             allAliases: Set<String>) -> HostFormPlan {
         let host = form.hostName.trimmingCharacters(in: .whitespaces)
+        let ownAliases = Set(existing.map(\.alias))
+        var taken = allAliases.subtracting(ownAliases)
+
         let base = uniqueAlias(ProfileFactory.sanitizedAlias(form.displayName.trimmingCharacters(in: .whitespaces)),
-                               taken: allAliases, existingForThisGroup: Set(existing.map(\.alias)))
+                               taken: taken)
+        taken.insert(base)
         let multi = form.rows.count > 1
         let groupName: String? = multi ? base : nil
 
-        var taken = allAliases
-        var usedExisting = Set<String>()
         var upserts: [HostFormPlan.Upsert] = []
 
         for (i, r) in form.rows.enumerated() {
@@ -77,13 +82,11 @@ public enum HostFormReconciler {
             let alias: String
             if i == 0 {
                 alias = base
-            } else if let match = existing.first(where: { $0.user == user && !usedExisting.contains($0.alias) }) {
+            } else if let match = existing.first(where: { $0.user == user && !taken.contains($0.alias) }) {
                 alias = match.alias                      // stability: unchanged user keeps its alias
             } else {
-                alias = uniqueAlias("\(base)-\(ProfileFactory.sanitizedAlias(user))",
-                                    taken: taken, existingForThisGroup: [])
+                alias = uniqueAlias("\(base)-\(ProfileFactory.sanitizedAlias(user))", taken: taken)
             }
-            usedExisting.insert(alias)
             taken.insert(alias)
             upserts.append(.init(alias: alias,
                                  properties: r.properties(hostName: host),
@@ -95,11 +98,9 @@ public enum HostFormReconciler {
         return HostFormPlan(upserts: upserts, deleteAliases: deletes)
     }
 
-    /// Prefer `candidate`; if taken by an alias NOT belonging to this group,
-    /// suffix -2, -3… (an alias already in this group is fine to reuse).
-    private static func uniqueAlias(_ candidate: String, taken: Set<String>,
-                                    existingForThisGroup: Set<String>) -> String {
-        if !taken.contains(candidate) || existingForThisGroup.contains(candidate) { return candidate }
+    /// Prefer `candidate`; if taken, suffix -2, -3… until free.
+    private static func uniqueAlias(_ candidate: String, taken: Set<String>) -> String {
+        if !taken.contains(candidate) { return candidate }
         var n = 2
         while taken.contains("\(candidate)-\(n)") { n += 1 }
         return "\(candidate)-\(n)"

@@ -70,3 +70,36 @@ private func form(_ name: String, host: String, _ rows: [CredentialRow]) -> Host
         existing: [], allAliases: ["web"])   // "web" taken by an unrelated host
     #expect(p.upserts[0].alias == "web-2")
 }
+
+@Test func editRecomputedBaseDoesNotChurnOtherMembers() {
+    // existing group: web(admin,default), web-api(api). Edit form leaves both rows
+    // unchanged — the recomputed base ("web") must not steal api's stable alias,
+    // and api's unchanged user/alias pairing must not get a needless -2 suffix.
+    let p = HostFormReconciler.plan(
+        form("web", host: "h", [row("admin"), row("api")]),
+        existing: [("web", "admin"), ("web-api", "api")],
+        allAliases: ["web", "web-api"])
+    #expect(p.upserts.contains { $0.alias == "web" && $0.properties.first("User") == "admin" && $0.isDefault })
+    #expect(p.upserts.contains { $0.alias == "web-api" && $0.properties.first("User") == "api" && !$0.isDefault })
+    #expect(p.deleteAliases.isEmpty)
+    #expect(!p.upserts.contains { $0.alias.hasSuffix("-2") })
+}
+
+@Test func reorderingRowsMovesDefaultAndKeepsOthers() {
+    // existing group: web(admin,default), web-deploy(deploy). Edit reorders rows so
+    // deploy is now first (the new default). deploy's new base alias "web" collides
+    // with admin's OLD alias — admin must be reassigned a stable non-base alias
+    // rather than the plan producing two upserts that both claim "web".
+    let p = HostFormReconciler.plan(
+        form("web", host: "h", [row("deploy"), row("admin")]),
+        existing: [("web", "admin"), ("web-deploy", "deploy")],
+        allAliases: ["web", "web-deploy"])
+    let users = Set(p.upserts.compactMap { $0.properties.first("User") })
+    #expect(users == ["admin", "deploy"])
+    #expect(p.upserts.filter(\.isDefault).count == 1)
+    let defaultUpsert = p.upserts.first(where: \.isDefault)
+    #expect(defaultUpsert?.properties.first("User") == "deploy")
+    #expect(defaultUpsert?.alias == "web")
+    #expect(p.upserts.first(where: { $0.properties.first("User") == "admin" })?.alias == "web-admin")
+    #expect(p.upserts.allSatisfy { $0.groupName == "web" })
+}
