@@ -24,7 +24,7 @@ struct HostDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text(entry.host).font(.largeTitle.bold())
+                Text(entry.displayName ?? entry.host).font(.largeTitle.bold())
 
                 if let group {
                     GroupBox("Profiles") {
