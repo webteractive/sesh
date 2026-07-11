@@ -61,6 +61,15 @@ private func row(_ alias: String, group: String? = nil, user: String? = nil,
     #expect(g[0].members.map(\.user) == ["amy", "bob"])
 }
 
+@Test func titleUsesDisplayNameWhenPresent() {
+    let g = HostGrouping.groups(from: [
+        HostRow(alias: "prod-web", groupName: nil, user: "admin", identityFile: nil,
+                isDefault: true, isConnectable: true, displayName: "Prod Web")
+    ])
+    #expect(g[0].title == "Prod Web")
+    #expect(g[0].members[0].alias == "prod-web")
+}
+
 @Test func singletonIdDoesNotCollideWithRealGroupName() {
     let g = HostGrouping.groups(from: [
         row("web"),

@@ -13,6 +13,9 @@ public final class HostEntry {
     public var groupName: String? = nil
     /// The profile chosen on a plain (non-picked) connect for its group.
     public var isDefaultProfile: Bool = false
+    /// Human label from the New Host form; shown in the UI, never written to
+    /// the ssh config. Nil for entries created before this field / by import.
+    public var displayName: String? = nil
 
     public init(host: String, properties: [SSHProperty], rawBlock: String?) {
         self.host = host

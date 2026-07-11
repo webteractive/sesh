@@ -7,15 +7,18 @@ public struct HostRow: Sendable, Equatable {
     public let identityFile: String?
     public let isDefault: Bool
     public let isConnectable: Bool
+    public let displayName: String?
 
     public init(alias: String, groupName: String?, user: String?,
-                identityFile: String?, isDefault: Bool, isConnectable: Bool) {
+                identityFile: String?, isDefault: Bool, isConnectable: Bool,
+                displayName: String? = nil) {
         self.alias = alias
         self.groupName = groupName
         self.user = user
         self.identityFile = identityFile
         self.isDefault = isDefault
         self.isConnectable = isConnectable
+        self.displayName = displayName
     }
 }
 
@@ -71,7 +74,7 @@ public enum HostGrouping {
                            user: r.user, identityFile: r.identityFile,
                            isDefault: r.isDefault, isConnectable: r.isConnectable)
             }
-            let title = rows.first?.groupName ?? members[0].alias
+            let title = rows.first?.displayName ?? rows.first?.groupName ?? members[0].alias
             return HostGroupView(id: key, title: title, members: members)
         }
     }

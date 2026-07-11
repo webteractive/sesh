@@ -17,9 +17,9 @@ public enum ProfileFactory {
         props.set("User", user)
         props.set("IdentityFile", identityFile)
 
-        let rawBase = sanitize(baseAlias)
+        let rawBase = sanitizedAlias(baseAlias)
         let safeBase = rawBase.isEmpty ? "host" : rawBase
-        let stem = sanitize(label)
+        let stem = sanitizedAlias(label)
         var candidate = "\(safeBase)-\(stem)"
         if existingAliases.contains(candidate) {
             var n = 2
@@ -31,7 +31,7 @@ public enum ProfileFactory {
 
     private static let allowedExtras: Set<Character> = [".", "_", "-"]
 
-    private static func sanitize(_ label: String) -> String {
+    public static func sanitizedAlias(_ label: String) -> String {
         let mapped = label.map { c -> Character in
             (c.isASCII && (c.isLetter || c.isNumber)) || allowedExtras.contains(c) ? c : "-"
         }
