@@ -97,11 +97,12 @@ struct MenuBarView: View {
     private func activateSelected() {
         guard groups.indices.contains(selectedIndex) else { return }
         let member = groups[selectedIndex].defaultMember
+        guard let entry = model.entry(forAlias: member.alias, in: hosts) else { return }
         // Enter opens in the terminal when possible; wildcard/pattern hosts
         // (no single connectable alias) fall back to copying the command.
         if member.isConnectable {
-            model.connect(member.alias)
-        } else if let entry = model.entry(forAlias: member.alias, in: hosts) {
+            model.connect(entry)
+        } else {
             model.copyCommand(entry)
         }
     }
@@ -121,11 +122,11 @@ struct MenuBarView: View {
             if group.isMultiProfile {
                 Menu {
                     ForEach(group.members) { member in
-                        Button("Connect as \(member.label)") {
-                            model.connect(member.alias)
-                        }
-                        Button("Copy \(member.label)") {
-                            if let memberEntry = model.entry(forAlias: member.alias, in: hosts) {
+                        if let memberEntry = model.entry(forAlias: member.alias, in: hosts) {
+                            Button("Connect as \(member.label)") {
+                                model.connect(memberEntry)
+                            }
+                            Button("Copy \(member.label)") {
                                 model.copyCommand(memberEntry)
                             }
                         }
@@ -146,9 +147,9 @@ struct MenuBarView: View {
                 .help("Copy \(defaultEntry.sshCommand)")
             }
 
-            if group.defaultMember.isConnectable {
+            if group.defaultMember.isConnectable, let defaultEntry {
                 Button {
-                    model.connect(group.defaultMember.alias)
+                    model.connect(defaultEntry)
                 } label: {
                     Image(systemName: "terminal")
                 }
@@ -163,10 +164,8 @@ struct MenuBarView: View {
 
     private var footer: some View {
         HStack {
-            Button("Sync Both") {
-                openMainWindow()
-                model.runSync(.both)
-            }
+            Button("Export") { model.exportNow() }
+                .help("Re-write the managed config file from the store")
             Spacer()
             Button("Open Sesh") { openMainWindow() }
             Spacer()

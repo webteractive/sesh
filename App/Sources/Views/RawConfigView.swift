@@ -7,12 +7,12 @@ struct RawConfigView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text(model.configPath ?? "No config path set")
+                Text(model.managedPath)
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button {
-                    text = model.rawConfigText()
+                    text = managedConfigText()
                 } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
@@ -28,6 +28,16 @@ struct RawConfigView: View {
             }
         }
         .frame(minWidth: 480, minHeight: 400)
-        .onAppear { text = model.rawConfigText() }
+        .onAppear { text = managedConfigText() }
+    }
+
+    /// Reads the managed sesh.conf fragment directly — this is Sesh's own
+    /// rendered output, not the user's real ~/.ssh/config.
+    private func managedConfigText() -> String {
+        let expanded = (model.managedPath as NSString).expandingTildeInPath
+        guard let text = try? String(contentsOfFile: expanded, encoding: .utf8) else {
+            return "No managed config yet."
+        }
+        return text
     }
 }

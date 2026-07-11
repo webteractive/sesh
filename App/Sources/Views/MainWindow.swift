@@ -66,13 +66,12 @@ struct MainWindow: View {
         .navigationTitle("Sesh")
         .toolbar {
             ToolbarItem(placement: .secondaryAction) {
-                Menu {
-                    ForEach(SyncMode.allCases) { mode in
-                        Button(mode.rawValue) { model.runSync(mode) }
-                    }
+                Button {
+                    importNow()
                 } label: {
-                    Label("Sync", systemImage: "arrow.triangle.2.circlepath")
+                    Label("Import", systemImage: "square.and.arrow.down")
                 }
+                .help("Import hosts from ~/.ssh/config that aren't already in Sesh")
             }
             ToolbarItem(placement: .secondaryAction) {
                 Button {
@@ -102,9 +101,6 @@ struct MainWindow: View {
         }
         .sheet(item: $addProfileBase) { base in
             AddProfileSheet(base: base)
-        }
-        .sheet(isPresented: $model.showSyncSheet) {
-            SyncSheet()
         }
         .sheet(isPresented: $model.showFirstRun) {
             FirstRunSheet()
@@ -169,7 +165,7 @@ struct MainWindow: View {
                     resolve: { alias in model.entry(forAlias: alias, in: hosts) },
                     onHost: { entry, action in
                         switch action {
-                        case .connect: model.connect(entry.host)
+                        case .connect: model.connect(entry)
                         case .copy: model.copyCommand(entry)
                         case .reveal:
                             search = ""
@@ -179,9 +175,7 @@ struct MainWindow: View {
                     onAction: { action in
                         switch action {
                         case .newHost: formMode = .create
-                        case .syncFromFile: model.runSync(.fromFile)
-                        case .syncToFile: model.runSync(.toFile)
-                        case .syncBoth: model.runSync(.both)
+                        case .importFromConfig: importNow()
                         case .rawConfig: openWindow(id: "raw-config")
                         case .settings: showSettings = true
                         }
@@ -268,7 +262,7 @@ struct MainWindow: View {
         context.insert(HostEntry(host: newHost, properties: entry.properties, rawBlock: nil))
         do {
             try context.save()
-            model.autoSyncToFile()
+            model.exportNow()
         } catch {
             context.rollback()
             model.pendingError = error.localizedDescription
@@ -291,7 +285,7 @@ struct MainWindow: View {
         context.delete(entry)
         do {
             try context.save()
-            model.autoSyncToFile()
+            model.exportNow()
         } catch {
             context.rollback()
             model.pendingError = error.localizedDescription
@@ -304,10 +298,17 @@ struct MainWindow: View {
         selection = []
         do {
             try context.save()
-            model.autoSyncToFile()
+            model.exportNow()
         } catch {
             context.rollback()
             model.pendingError = error.localizedDescription
         }
+    }
+
+    /// Imports hosts from the configured ~/.ssh/config and surfaces the result
+    /// via the same alert channel used for errors.
+    private func importNow() {
+        let result = model.importFromConfig()
+        model.pendingError = "Imported \(result.added) host\(result.added == 1 ? "" : "s") (\(result.skipped) already present)."
     }
 }

@@ -10,7 +10,7 @@ struct FirstRunSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             Label("SSH Config Path", systemImage: "gearshape")
                 .font(.title2.bold())
-            Text("Setting your SSH config path is required to use this app. It tells Sesh where your configuration file lives. If the file exists it will be backed up and imported.")
+            Text("Setting your ~/.ssh/config path is required to use this app. Sesh links its managed config into it, and can import your existing hosts from it.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -24,7 +24,13 @@ struct FirstRunSheet: View {
             HStack {
                 Spacer()
                 Button("Save") {
-                    error = model.saveConfigPath(path)
+                    if let message = model.saveConfigPath(path) {
+                        error = message
+                        return
+                    }
+                    if let message = model.linkInclude() {
+                        model.pendingError = message
+                    }
                 }
                 .keyboardShortcut(.return)
                 .buttonStyle(.borderedProminent)

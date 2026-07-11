@@ -3,16 +3,14 @@ import SwiftData
 import SSHConfigCore
 
 enum PaletteAction: CaseIterable, Identifiable {
-    case newHost, syncFromFile, syncToFile, syncBoth, rawConfig, settings
+    case newHost, importFromConfig, rawConfig, settings
 
     var id: Self { self }
 
     var title: String {
         switch self {
         case .newHost: "New Host"
-        case .syncFromFile: "Sync From File"
-        case .syncToFile: "Sync To File"
-        case .syncBoth: "Sync Both"
+        case .importFromConfig: "Import from Config"
         case .rawConfig: "Raw Config"
         case .settings: "Settings"
         }
@@ -21,9 +19,7 @@ enum PaletteAction: CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .newHost: "plus"
-        case .syncFromFile: "arrow.down.doc"
-        case .syncToFile: "arrow.up.doc"
-        case .syncBoth: "arrow.triangle.2.circlepath"
+        case .importFromConfig: "square.and.arrow.down"
         case .rawConfig: "doc.plaintext"
         case .settings: "gearshape"
         }

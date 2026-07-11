@@ -111,7 +111,7 @@ struct HostFormSheet: View {
             self.error = error.localizedDescription
             return
         }
-        model.autoSyncToFile()
+        model.exportNow()
         dismiss()
     }
 }

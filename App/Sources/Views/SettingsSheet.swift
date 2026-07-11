@@ -11,15 +11,29 @@ struct SettingsSheet: View {
     @State private var error: String?
 
     var body: some View {
+        @Bindable var model = model
         VStack(alignment: .leading, spacing: 14) {
             Label("Settings", systemImage: "gearshape")
                 .font(.title2.bold())
-            Text("The SSH config path tells Sesh where your configuration file lives. If the file exists it will be backed up and imported.")
+            Text("The SSH config path tells Sesh where your ~/.ssh/config lives, for linking and importing.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             TextField("Config path", text: $path, prompt: Text("~/.ssh/config"))
                 .font(.body.monospaced())
+
+            TextField("Managed file path", text: $model.managedPath, prompt: Text("~/.ssh/sesh.conf"))
+                .font(.body.monospaced())
+
+            includeStatusRow
+
+            HStack {
+                Button("Import from ~/.ssh/config") {
+                    let result = model.importFromConfig()
+                    model.pendingError = "Imported \(result.added) host\(result.added == 1 ? "" : "s") (\(result.skipped) already present)."
+                }
+                Spacer()
+            }
 
             if model.selectableTerminals.isEmpty {
                 Text("No supported terminal detected — Connect uses the system default.")
@@ -60,6 +74,24 @@ struct SettingsSheet: View {
         .onAppear {
             path = model.configPath ?? ConfigPathStore.defaultSuggestion
             model.refreshTerminals()
+        }
+    }
+
+    @ViewBuilder
+    private var includeStatusRow: some View {
+        if model.managedFileActive {
+            Label("Linked into ~/.ssh/config ✓", systemImage: "checkmark.circle")
+                .foregroundStyle(.green)
+                .font(.callout)
+        } else {
+            HStack {
+                Button("Link into ~/.ssh/config") {
+                    if let message = model.linkInclude() {
+                        error = message
+                    }
+                }
+                Spacer()
+            }
         }
     }
 }

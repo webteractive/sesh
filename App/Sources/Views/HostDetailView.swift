@@ -90,13 +90,13 @@ struct HostDetailView: View {
                         Menu {
                             ForEach(model.selectableTerminals) { terminal in
                                 Button("Connect with \(terminal.name)") {
-                                    model.connect(entry.host, with: terminal)
+                                    model.connect(entry, with: terminal)
                                 }
                             }
                         } label: {
                             Label("Connect · \(model.preferredTerminal.name)", systemImage: "terminal")
                         } primaryAction: {
-                            model.connect(entry.host)
+                            model.connect(entry)
                         }
                         .fixedSize()
                         .keyboardShortcut(.return, modifiers: .command)
@@ -146,17 +146,17 @@ struct HostDetailView: View {
                 }
             }
             Spacer()
-            if member.isConnectable {
+            if member.isConnectable, let memberEntry {
                 Menu {
                     ForEach(model.selectableTerminals) { terminal in
                         Button("Connect with \(terminal.name)") {
-                            model.connect(member.alias, with: terminal)
+                            model.connect(memberEntry, with: terminal)
                         }
                     }
                 } label: {
                     Label("Connect", systemImage: "terminal")
                 } primaryAction: {
-                    model.connect(member.alias)
+                    model.connect(memberEntry)
                 }
                 .fixedSize()
             }
