@@ -18,12 +18,12 @@ import Foundation
         ProxyJump bastion
     """.write(toFile: config, atomically: true, encoding: .utf8)
 
-    let hosts = ConfigImporter().hosts(inConfigAt: config, managedPath: "~/.ssh/sesh.conf")
+    let hosts = ConfigImporter().hosts(inConfigAt: config)
     #expect(hosts.map(\.alias) == ["web"])       // Include + Match not hosts
     #expect(hosts[0].properties.first("HostName") == "example.com")
     #expect(hosts[0].properties.first("User") == "admin")
 }
 
 @Test func missingFileImportsNothing() {
-    #expect(ConfigImporter().hosts(inConfigAt: "/nope/config", managedPath: "~/.ssh/sesh.conf").isEmpty)
+    #expect(ConfigImporter().hosts(inConfigAt: "/nope/config").isEmpty)
 }

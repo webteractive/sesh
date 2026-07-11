@@ -48,15 +48,12 @@ final class AppModel {
     }
 
     /// Resolved terminal used by Connect: the explicit pick if still installed,
-    /// else Zetty if installed, else the first detected terminal, else the
-    /// invisible system-default fallback (so Connect never dead-ends).
+    /// else the first detected ssh:// terminal, else the invisible
+    /// system-default fallback (so Connect never dead-ends).
     var preferredTerminal: Terminal {
         if let stored = installedTerminals.first(where: { $0.id == preferredTerminalId }),
            stored.id != TerminalRegistry.systemDefaultId {
             return stored
-        }
-        if let zetty = installedTerminals.first(where: { $0.id == "dev.more.zetty" }) {
-            return zetty
         }
         return selectableTerminals.first ?? TerminalRegistry.known[0]
     }
@@ -96,22 +93,15 @@ final class AppModel {
         installedTerminals = terminalLauncher.detectInstalled()
     }
 
-    /// Returns an error message, or nil on success (mirrors SetConfigPathAction:
-    /// store path, backup if the file exists, initial import).
+    /// Returns an error message, or nil on success. Only stores the path;
+    /// import is manual/optional and nothing touches the file at path-set
+    /// time (backups happen in ensureInclude/export when we actually write).
     func saveConfigPath(_ raw: String) -> String? {
         switch ConfigPathStore.validate(raw) {
         case .failure(let message):
             return message
         case .success(let expanded):
             pathStore.path = expanded
-            if FileManager.default.fileExists(atPath: expanded) {
-                do {
-                    try BackupManager().backup(configPath: expanded)
-                    importFromConfig()
-                } catch {
-                    pendingError = "Path saved, but backup or import failed: \(error.localizedDescription)"
-                }
-            }
             showFirstRun = false
             return nil
         }
@@ -136,14 +126,20 @@ final class AppModel {
         let path = configPath ?? ConfigPathStore.defaultSuggestion
         let existing = Set((try? context.fetch(FetchDescriptor<HostEntry>()))?.map(\.host) ?? [])
         var added = 0, skipped = 0
-        for host in importer.hosts(inConfigAt: path, managedPath: managedPath) {
+        for host in importer.hosts(inConfigAt: path) {
             if existing.contains(host.alias) { skipped += 1; continue }
             context.insert(HostEntry(host: host.alias, properties: host.properties, rawBlock: nil))
             added += 1
         }
-        do { try context.save(); exportNow() }
-        catch { context.rollback(); pendingError = error.localizedDescription }
-        return (added, skipped)
+        do {
+            try context.save()
+            exportNow()
+            return (added, skipped)
+        } catch {
+            context.rollback()
+            pendingError = error.localizedDescription
+            return (0, 0)
+        }
     }
 
     var managedFileActive: Bool {

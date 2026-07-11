@@ -15,7 +15,7 @@ public struct ConfigImporter {
 
     public init() {}
 
-    public func hosts(inConfigAt path: String, managedPath: String) -> [ImportedHost] {
+    public func hosts(inConfigAt path: String) -> [ImportedHost] {
         // `parseFile(at:)` throws on an unreadable (e.g. permission-denied) file;
         // a missing file already parses as `[]` internally, so `try?` here only
         // swallows the genuinely-unreadable case, which we treat as "nothing to
