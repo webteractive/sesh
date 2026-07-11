@@ -131,16 +131,27 @@ final class AppModel {
         }
     }
 
-    /// Adds hosts from ~/.ssh/config that aren't already in the store (by alias).
+    /// Adds hosts from ~/.ssh/config that aren't already in the store (by
+    /// alias). Group-aware: hosts sharing a `HostName` across ≥2 distinct
+    /// users import as one profile group (members keep their original
+    /// aliases); everything else imports as a standalone host. Additive
+    /// only — never deletes or renames an existing alias.
     @discardableResult
     func importFromConfig() -> (added: Int, skipped: Int) {
         let path = configPath ?? ConfigPathStore.defaultSuggestion
         let existing = Set((try? context.fetch(FetchDescriptor<HostEntry>()))?.map(\.host) ?? [])
         var added = 0, skipped = 0
-        for host in importer.hosts(inConfigAt: path) {
-            if existing.contains(host.alias) { skipped += 1; continue }
-            context.insert(HostEntry(host: host.alias, properties: host.properties, rawBlock: nil))
-            added += 1
+        for group in importer.groups(inConfigAt: path) {
+            let isGroup = group.groupName != nil
+            for (index, member) in group.members.enumerated() {
+                if existing.contains(member.alias) { skipped += 1; continue }
+                let entry = HostEntry(host: member.alias, properties: member.properties, rawBlock: nil)
+                entry.displayName = group.displayName
+                entry.groupName = group.groupName
+                entry.isDefaultProfile = isGroup && index == 0
+                context.insert(entry)
+                added += 1
+            }
         }
         do {
             try context.save()
