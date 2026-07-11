@@ -13,8 +13,9 @@ public struct IncludeManager {
         let expanded = (configPath as NSString).expandingTildeInPath
         guard let text = try? String(contentsOfFile: expanded, encoding: .utf8) else { return false }
         let line = includeLine(managedPath: managedPath)
-        return text.split(separator: "\n", omittingEmptySubsequences: false)
-            .contains { $0.trimmingCharacters(in: .whitespaces) == line }
+        return text.replacingOccurrences(of: "\r\n", with: "\n")
+            .components(separatedBy: "\n")
+            .contains { $0.trimmingCharacters(in: .whitespacesAndNewlines) == line }
     }
 
     /// Returns true if it added the line, false if it was already present.
@@ -24,24 +25,18 @@ public struct IncludeManager {
         let line = includeLine(managedPath: managedPath)
 
         let existing = (try? String(contentsOfFile: expanded, encoding: .utf8)) ?? ""
-        if existing.split(separator: "\n", omittingEmptySubsequences: false)
-            .contains(where: { $0.trimmingCharacters(in: .whitespaces) == line }) {
+        if existing.replacingOccurrences(of: "\r\n", with: "\n")
+            .components(separatedBy: "\n")
+            .contains(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines) == line }) {
             return false
         }
         if FileManager.default.fileExists(atPath: expanded) {
             try backups.backup(configPath: expanded)   // backup before editing
-        } else {
-            let dir = (expanded as NSString).deletingLastPathComponent
-            if !FileManager.default.fileExists(atPath: dir) {
-                try FileManager.default.createDirectory(atPath: dir,
-                    withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-            }
         }
         // Include at the top so managed aliases resolve regardless of any
         // `Host *` defaults later in the user's file.
         let body = existing.isEmpty ? line + "\n" : line + "\n\n" + existing
-        try body.write(toFile: expanded, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: expanded)
+        try SSHConfigWriter().write(body, toPath: expanded)
         return true
     }
 }

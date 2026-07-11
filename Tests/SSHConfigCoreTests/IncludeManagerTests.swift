@@ -54,3 +54,15 @@ private func tempDir() -> String {
     _ = try mgr.ensureInclude(managedPath: "~/.ssh/sesh.conf", configPath: config)
     #expect(mgr.hasInclude(managedPath: "~/.ssh/sesh.conf", configPath: config) == true)
 }
+
+@Test func ensureIncludeIdempotentWithCRLFConfig() throws {
+    let dir = tempDir(); defer { try? FileManager.default.removeItem(atPath: dir) }
+    let config = dir + "/config"
+    try "Include ~/.ssh/sesh.conf\r\nHost a\r\n".write(toFile: config, atomically: true, encoding: .utf8)
+    let mgr = IncludeManager()
+
+    let added = try mgr.ensureInclude(managedPath: "~/.ssh/sesh.conf", configPath: config)
+    #expect(added == false)                           // already present despite trailing \r
+    let text = try String(contentsOfFile: config, encoding: .utf8)
+    #expect(text.components(separatedBy: "Include ~/.ssh/sesh.conf").count == 2) // exactly one occurrence
+}
