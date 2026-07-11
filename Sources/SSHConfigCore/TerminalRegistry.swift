@@ -12,10 +12,8 @@ public struct Terminal: Equatable, Identifiable, Sendable {
 }
 
 public enum LaunchPlan: Equatable, Sendable {
-    case systemDefault           // NSWorkspace.open(ssh://host) — whatever handles the scheme
-    case sshURL                  // open ssh://host WITH this specific app
-    case openArgs([String])     // launch the app with argv; "%h" is replaced by the host alias
-    case zettyCLI                // zetty new-tab → send "ssh host" --enter
+    case systemDefault   // NSWorkspace.open(ssh://…) — whatever handles the scheme
+    case sshURL          // open ssh://… WITH this specific ssh://-registering app
 }
 
 public enum TerminalRegistry {
@@ -26,21 +24,7 @@ public enum TerminalRegistry {
         Terminal(id: "com.apple.Terminal", name: "Terminal", launchPlan: .sshURL),
         Terminal(id: "com.googlecode.iterm2", name: "iTerm2", launchPlan: .sshURL),
         Terminal(id: "dev.warp.Warp-Stable", name: "Warp", launchPlan: .sshURL),
-        Terminal(id: "com.mitchellh.ghostty", name: "Ghostty", launchPlan: .openArgs(["-e", "ssh", "--", "%h"])),
-        Terminal(id: "org.alacritty", name: "Alacritty", launchPlan: .openArgs(["-e", "ssh", "--", "%h"])),
-        Terminal(id: "net.kovidgoyal.kitty", name: "kitty", launchPlan: .openArgs(["ssh", "--", "%h"])),
-        Terminal(id: "com.github.wez.wezterm", name: "WezTerm", launchPlan: .openArgs(["start", "--", "ssh", "--", "%h"])),
-        Terminal(id: "dev.more.zetty", name: "Zetty", launchPlan: .zettyCLI),
     ]
 
-    public static func terminal(withId id: String) -> Terminal? {
-        known.first { $0.id == id }
-    }
-
-    /// Concrete argv for a host — only .openArgs plans expand; others are
-    /// handled wholesale by the launcher.
-    public static func arguments(for plan: LaunchPlan, host: String) -> [String]? {
-        guard case .openArgs(let template) = plan else { return nil }
-        return template.map { $0 == "%h" ? host : $0 }
-    }
+    public static func terminal(withId id: String) -> Terminal? { known.first { $0.id == id } }
 }
