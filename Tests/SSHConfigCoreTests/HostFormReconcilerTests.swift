@@ -64,6 +64,29 @@ private func form(_ name: String, host: String, _ rows: [CredentialRow]) -> Host
     #expect(p.upserts[0].properties.first("ProxyJump") == "bastion")
 }
 
+@Test func credentialRowPreservesSurplusIdentityFiles() {
+    let props: [SSHProperty] = [
+        SSHProperty(key: "HostName", values: ["10.0.0.5"]),
+        SSHProperty(key: "User", values: ["admin"]),
+        SSHProperty(key: "IdentityFile", values: ["a", "b"]),
+        SSHProperty(key: "ProxyJump", values: ["bastion"]),
+    ]
+    let r = CredentialRow(fromProperties: props)
+    #expect(r.user == "admin")
+    #expect(r.identityFile == "a")
+    #expect(r.extras.first("IdentityFile") == "b")
+    #expect(r.extras.first("ProxyJump") == "bastion")
+
+    // Round-trip through the reconciler: both identity files must survive.
+    let p = HostFormReconciler.plan(
+        form("web", host: "10.0.0.5", [r]),
+        existing: [], allAliases: [])
+    let identityFiles = p.upserts[0].properties
+        .filter { $0.key.caseInsensitiveCompare("IdentityFile") == .orderedSame }
+        .flatMap(\.values)
+    #expect(identityFiles == ["a", "b"])
+}
+
 @Test func aliasCollisionsSuffixed() {
     let p = HostFormReconciler.plan(
         form("web", host: "h", [row("admin")]),

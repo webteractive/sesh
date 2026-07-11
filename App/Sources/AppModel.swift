@@ -258,7 +258,7 @@ final class AppModel {
         // Snapshot for rollback of dirty in-memory fields (SwiftData's
         // rollback() discards pending inserts/deletes but doesn't reliably
         // revert property changes on already-persisted objects).
-        let snapshot = members.map { ($0, $0.host, $0.groupName, $0.isDefaultProfile, $0.displayName) }
+        let snapshot = members.map { ($0, $0.host, $0.groupName, $0.isDefaultProfile, $0.displayName, $0.properties, $0.updatedAt) }
 
         for alias in plan.deleteAliases { if let e = byAlias[alias] { context.delete(e) } }
         for u in plan.upserts {
@@ -280,11 +280,13 @@ final class AppModel {
             return nil
         } catch {
             context.rollback()
-            for (e, host, group, isDefault, name) in snapshot {
+            for (e, host, group, isDefault, name, properties, updatedAt) in snapshot {
                 e.host = host
                 e.groupName = group
                 e.isDefaultProfile = isDefault
                 e.displayName = name
+                e.properties = properties
+                e.updatedAt = updatedAt
             }
             return error.localizedDescription
         }

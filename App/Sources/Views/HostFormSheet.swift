@@ -134,13 +134,7 @@ struct HostFormSheet: View {
         let orderedMembers = [defaultMember] + rest
 
         let rows = orderedMembers.map { member -> CredentialRow in
-            let props = member.properties
-            let extras = props.filter { !HostFormData.coreKeys.contains($0.key.lowercased()) }
-            return CredentialRow(
-                user: props.first("User") ?? "",
-                port: props.first("Port") ?? "",
-                identityFile: props.first("IdentityFile") ?? "",
-                extras: extras)
+            CredentialRow(fromProperties: member.properties)
         }
 
         return HostFormModel(

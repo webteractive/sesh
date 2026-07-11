@@ -254,7 +254,9 @@ struct MainWindow: View {
             newHost = "\(entry.host)-copy-\(counter)"
             counter += 1
         }
-        context.insert(HostEntry(host: newHost, properties: entry.properties, rawBlock: nil))
+        let duplicated = HostEntry(host: newHost, properties: entry.properties, rawBlock: nil)
+        duplicated.displayName = entry.displayName
+        context.insert(duplicated)
         do {
             try context.save()
             model.exportNow()

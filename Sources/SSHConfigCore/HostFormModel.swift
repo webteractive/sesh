@@ -20,6 +20,32 @@ public struct CredentialRow: Equatable, Sendable {
     }
 }
 
+public extension CredentialRow {
+    /// Build a row from a member's full property list: first value of each
+    /// core key fills the field; any SURPLUS core-key values and all
+    /// non-core properties are preserved as `extras` (so nothing is lost
+    /// on round-trip — the writer/parser re-merge repeated keys).
+    init(fromProperties props: [SSHProperty]) {
+        var extras: [SSHProperty] = []
+        for p in props {
+            let k = p.key.lowercased()
+            if k == "hostname" || k == "user" || k == "port" { continue } // shared/handled by form fields; HostName is form-level
+            if k == "identityfile" {
+                // first value → field; rest preserved as extras
+                if p.values.count > 1 {
+                    extras.append(SSHProperty(key: p.key, values: Array(p.values.dropFirst())))
+                }
+            } else {
+                extras.append(p)
+            }
+        }
+        self.init(user: props.first("User") ?? "",
+                  port: props.first("Port") ?? "",
+                  identityFile: props.first("IdentityFile") ?? "",
+                  extras: extras)
+    }
+}
+
 public struct HostFormModel: Equatable, Sendable {
     public var displayName: String
     public var hostName: String
