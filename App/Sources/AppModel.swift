@@ -4,37 +4,41 @@ import Observation
 import SwiftData
 import SSHConfigCore
 
-enum SyncMode: String, CaseIterable, Identifiable {
-    case fromFile = "Sync From File"
-    case toFile = "Sync To File"
-    case both = "Sync Both"
-    var id: String { rawValue }
-}
-
 @MainActor
 @Observable
 final class AppModel {
     static let container: ModelContainer = {
         do {
-            return try ModelContainer(for: HostEntry.self)
+            let dir = URL.applicationSupportDirectory.appending(path: "Sesh", directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let config = ModelConfiguration(url: dir.appending(path: "Sesh.store"))
+            return try ModelContainer(for: HostEntry.self, configurations: config)
         } catch {
             fatalError("Failed to create SwiftData container: \(error)")
         }
     }()
 
     private let pathStore = ConfigPathStore()
-    private let engine = SyncEngine()
-    private let detector = ConflictDetector()
-    let resolver = ConflictResolver()
+    private let exporter = ConfigExporter()
+    private let includeManager = IncludeManager()
+    private let importer = ConfigImporter()
 
     private let terminalLauncher = TerminalLauncher()
     var installedTerminals: [Terminal] = []
 
     static let preferredTerminalKey = "preferredTerminalId"
+    static let managedPathKey = "managedConfigPath"
 
     var preferredTerminalId: String {
         get { UserDefaults.standard.string(forKey: Self.preferredTerminalKey) ?? "" }
         set { UserDefaults.standard.set(newValue, forKey: Self.preferredTerminalKey) }
+    }
+
+    /// Path to the app-managed config fragment that's `Include`d from the
+    /// user's real ssh config; defaults alongside it under `~/.ssh`.
+    var managedPath: String {
+        get { UserDefaults.standard.string(forKey: Self.managedPathKey) ?? "~/.ssh/sesh.conf" }
+        set { UserDefaults.standard.set(newValue, forKey: Self.managedPathKey) }
     }
 
     /// Detected terminals the user can actually pick — System Default is a
@@ -58,9 +62,6 @@ final class AppModel {
     }
 
     var pendingError: String?
-    var syncItems: [SyncItem]?
-    var conflicts: [Conflict] = []
-    var showSyncSheet = false
     var showFirstRun = false
 
     var context: ModelContext { Self.container.mainContext }
@@ -106,7 +107,7 @@ final class AppModel {
             if FileManager.default.fileExists(atPath: expanded) {
                 do {
                     try BackupManager().backup(configPath: expanded)
-                    _ = try engine.syncFromFile(path: expanded, context: context)
+                    importFromConfig()
                 } catch {
                     pendingError = "Path saved, but backup or import failed: \(error.localizedDescription)"
                 }
@@ -116,49 +117,81 @@ final class AppModel {
         }
     }
 
-    func runSync(_ mode: SyncMode) {
-        guard let path = configPath else { showFirstRun = true; return }
+    /// Renders the whole store to the managed file and ensures the Include.
+    /// Store is the source of truth, so failures only warn (file is rebuildable).
+    func exportNow() {
         do {
-            switch mode {
-            case .fromFile: syncItems = try engine.syncFromFile(path: path, context: context)
-            case .toFile:  try engine.syncToFile(path: path, context: context); syncItems = []
-            case .both:    syncItems = try engine.syncBoth(path: path, context: context)
-            }
-            conflicts = try detector.detect(path: path, context: context)
-            showSyncSheet = true
+            let entries = try context.fetch(FetchDescriptor<HostEntry>(sortBy: [SortDescriptor(\.createdAt)]))
+                .map { RenderableHost(host: $0.host, properties: $0.properties) }
+            try exporter.write(entries, toPath: managedPath)
+            try includeManager.ensureInclude(managedPath: managedPath, configPath: configPath ?? ConfigPathStore.defaultSuggestion)
         } catch {
-            pendingError = error.localizedDescription
-            // syncBoth's fromFile phase may have already persisted store changes
-            // before toFile threw; refresh conflicts against what's actually on
-            // disk/in the store and drop stale results so the UI doesn't show a
-            // sync outcome that didn't fully happen.
-            refreshConflicts()
-            syncItems = nil
+            pendingError = "Export failed: \(error.localizedDescription)"
         }
     }
 
-    /// Fire-and-forget store→file sync after every mutation (Laravel's
-    /// rescue()-wrapped after() hooks): failures warn, never roll back.
-    func autoSyncToFile() {
-        guard let path = configPath else { return }
-        do { try engine.syncToFile(path: path, context: context) }
-        catch { pendingError = "Saved, but writing the config file failed: \(error.localizedDescription)" }
+    /// Adds hosts from ~/.ssh/config that aren't already in the store (by alias).
+    @discardableResult
+    func importFromConfig() -> (added: Int, skipped: Int) {
+        let path = configPath ?? ConfigPathStore.defaultSuggestion
+        let existing = Set((try? context.fetch(FetchDescriptor<HostEntry>()))?.map(\.host) ?? [])
+        var added = 0, skipped = 0
+        for host in importer.hosts(inConfigAt: path, managedPath: managedPath) {
+            if existing.contains(host.alias) { skipped += 1; continue }
+            context.insert(HostEntry(host: host.alias, properties: host.properties, rawBlock: nil))
+            added += 1
+        }
+        do { try context.save(); exportNow() }
+        catch { context.rollback(); pendingError = error.localizedDescription }
+        return (added, skipped)
     }
 
-    func refreshConflicts() {
-        guard let path = configPath else { return }
-        conflicts = (try? detector.detect(path: path, context: context)) ?? []
+    var managedFileActive: Bool {
+        let path = configPath ?? ConfigPathStore.defaultSuggestion
+        return includeManager.hasInclude(managedPath: managedPath, configPath: path)
+            && FileManager.default.fileExists(atPath: (managedPath as NSString).expandingTildeInPath)
     }
 
-    /// Connect via a specific terminal, or the preferred one when nil.
-    func connect(_ host: String, with terminal: Terminal? = nil) {
+    @discardableResult
+    func linkInclude() -> String? {
+        do { try includeManager.ensureInclude(managedPath: managedPath,
+                                              configPath: configPath ?? ConfigPathStore.defaultSuggestion); return nil }
+        catch { return error.localizedDescription }
+    }
+
+    func connect(_ entry: HostEntry, with terminal: Terminal? = nil) {
+        guard HostValidation.isSafeToLaunch(entry.host) else {
+            pendingError = "'\(entry.host)' isn't a safe alias to connect."
+            return
+        }
+        guard let url = connectURL(for: entry) else {
+            pendingError = "Couldn't build a connection URL for '\(entry.host)'."
+            return
+        }
         do {
-            try terminalLauncher.launch(terminal ?? preferredTerminal, host: host) { [weak self] msg in
+            try terminalLauncher.open(url, with: terminal ?? preferredTerminal) { [weak self] msg in
                 self?.pendingError = msg
             }
         } catch {
             pendingError = error.localizedDescription
         }
+    }
+
+    /// ssh://<alias> when the managed file is active; otherwise a direct
+    /// ssh://[user@]hostname[:port] built from the entry's properties.
+    private func connectURL(for entry: HostEntry) -> URL? {
+        if managedFileActive {
+            return URL(string: "ssh://\(entry.host)")
+        }
+        let host = entry.properties.first("HostName") ?? entry.host
+        var s = "ssh://"
+        if let user = entry.properties.first("User"),
+           let enc = user.addingPercentEncoding(withAllowedCharacters: .urlUserAllowed) {
+            s += "\(enc)@"
+        }
+        s += host
+        if let port = entry.properties.first("Port") { s += ":\(port)" }
+        return URL(string: s)
     }
 
     func copyCommand(_ entry: HostEntry) {
@@ -216,7 +249,7 @@ final class AppModel {
         context.insert(entry)
         do {
             try context.save()
-            autoSyncToFile()
+            exportNow()
             return nil
         } catch {
             context.rollback()
@@ -246,7 +279,7 @@ final class AppModel {
         }
         do {
             try context.save()
-            autoSyncToFile()
+            exportNow()
             return nil
         } catch {
             context.rollback()
@@ -259,13 +292,13 @@ final class AppModel {
     }
 
     /// Clears `groupName`/`isDefaultProfile` on every member, saves, and
-    /// auto-syncs. Returns an error message, or nil on success.
+    /// re-exports. Returns an error message, or nil on success.
     func ungroup(_ members: [HostEntry]) -> String? {
         let snapshot = members.map { ($0, $0.groupName, $0.isDefaultProfile) }
         for m in members { m.groupName = nil; m.isDefaultProfile = false }
         do {
             try context.save()
-            autoSyncToFile()
+            exportNow()
             return nil
         } catch {
             context.rollback()
