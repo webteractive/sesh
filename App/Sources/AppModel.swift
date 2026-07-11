@@ -96,13 +96,16 @@ final class AppModel {
     /// Returns an error message, or nil on success. Only stores the path;
     /// import is manual/optional and nothing touches the file at path-set
     /// time (backups happen in ensureInclude/export when we actually write).
+    ///
+    /// Doesn't flip `showFirstRun` itself — `FirstRunSheet` stays open after a
+    /// successful save so it can offer to import existing hosts, dismissing
+    /// only once the user picks Import or Skip.
     func saveConfigPath(_ raw: String) -> String? {
         switch ConfigPathStore.validate(raw) {
         case .failure(let message):
             return message
         case .success(let expanded):
             pathStore.path = expanded
-            showFirstRun = false
             return nil
         }
     }

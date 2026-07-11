@@ -196,6 +196,18 @@ struct MainWindow: View {
                            onRemoveProfile: { profileEntry, members in
                                removeProfileRequest = (entry: profileEntry, members: members)
                            })
+        } else if hosts.isEmpty {
+            ContentUnavailableView {
+                Label("No Hosts Yet", systemImage: "server.rack")
+            } description: {
+                Text("Press ⌘N to add one, or import your existing config.")
+            } actions: {
+                Button {
+                    importNow()
+                } label: {
+                    Label("Import from ~/.ssh/config", systemImage: "square.and.arrow.down")
+                }
+            }
         } else if selection.isEmpty {
             ContentUnavailableView("No Host Selected",
                                    systemImage: "server.rack",
