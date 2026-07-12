@@ -93,6 +93,26 @@ final class AppModel {
         installedTerminals = terminalLauncher.detectInstalled()
     }
 
+    // MARK: - Dock icon visibility
+
+    /// Number of visible app windows. The Dock icon (`.regular` policy) is
+    /// shown while ≥1 window is open and hidden (`.accessory`, menu-bar-only)
+    /// once the last window is explicitly closed.
+    private var openWindowCount = 0
+
+    func windowAppeared() {
+        openWindowCount += 1
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func windowDisappeared() {
+        openWindowCount = max(0, openWindowCount - 1)
+        if openWindowCount == 0 {
+            NSApp.setActivationPolicy(.accessory)
+        }
+    }
+
     /// Returns an error message, or nil on success. Only stores the path;
     /// import is manual/optional and nothing touches the file at path-set
     /// time (backups happen in ensureInclude/export when we actually write).
