@@ -50,6 +50,84 @@ final class AppModel {
     /// Settings sheet once it's up; the window consumes and clears it.
     var pendingShowSettings = false
 
+    /// Tab the Settings sheet should open to ("general"/"ssh"/"about"); nil
+    /// leaves the last/default tab. Consumed by the sheet on appear.
+    var pendingSettingsTab: String?
+
+    // MARK: - Self-update
+
+    enum UpdatePhase: Equatable {
+        case idle
+        case checking
+        case upToDate
+        case available(AvailableUpdate)
+        case downloading(Double)
+        case verifying
+        case preparing
+        case relaunching
+        case failed(String)
+    }
+
+    var updatePhase: UpdatePhase = .idle
+    @ObservationIgnored private lazy var updateChecker = UpdateChecker(currentVersion: AppModel.appVersion)
+    @ObservationIgnored private let updateInstaller = UpdateInstaller()
+
+    static var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+    }
+
+    /// The pending update, if the current phase is `.available`.
+    var availableUpdate: AvailableUpdate? {
+        if case .available(let u) = updatePhase { return u }
+        return nil
+    }
+
+    /// True while a download/verify/install is in flight (progress showing).
+    var isInstallingUpdate: Bool {
+        switch updatePhase {
+        case .downloading, .verifying, .preparing, .relaunching: true
+        default: false
+        }
+    }
+
+    /// Checks GitHub for a newer release. `explicit` surfaces the "up to date"
+    /// and error outcomes; a silent (launch/periodic) check leaves the phase
+    /// `.idle` on those so nothing nags the user. Never interrupts an install.
+    func checkForUpdates(explicit: Bool) {
+        guard !isInstallingUpdate, updatePhase != .checking else { return }
+        updatePhase = .checking
+        updateChecker.check { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let update?):
+                self.updatePhase = .available(update)
+            case .success(nil):
+                self.updatePhase = explicit ? .upToDate : .idle
+            case .failure:
+                self.updatePhase = explicit ? .failed("Couldn't check for updates.") : .idle
+            }
+        }
+    }
+
+    /// Downloads and installs the available update in place; the app quits into
+    /// the swap helper on success. No-op unless an installable update is ready.
+    func installUpdate() {
+        guard case .available(let update) = updatePhase, update.isInstallable else { return }
+        updateInstaller.install(update, progress: { [weak self] p in
+            switch p {
+            case .downloading(let f): self?.updatePhase = .downloading(f)
+            case .verifying: self?.updatePhase = .verifying
+            case .preparing: self?.updatePhase = .preparing
+            case .relaunching: self?.updatePhase = .relaunching
+            }
+        }, completion: { [weak self] result in
+            if case .failure(let error) = result {
+                self?.updatePhase = .failed(String(describing: error))
+            }
+            // .success terminates the app into the helper.
+        })
+    }
+
     /// Path to the app-managed config fragment that's `Include`d from the
     /// user's real ssh config; defaults alongside it under `~/.ssh`.
     var managedPath: String {
@@ -108,6 +186,7 @@ final class AppModel {
         refreshTerminals()
         applyAppearance()
         showFirstRun = (configPath == nil)
+        checkForUpdates(explicit: false)
     }
 
     static let appearanceKey = "appearancePreference"

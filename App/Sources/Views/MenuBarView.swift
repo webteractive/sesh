@@ -76,6 +76,24 @@ struct MenuBarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if let update = model.availableUpdate {
+                Button { openUpdateSettings() } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.down.circle.fill")
+                        Text("Update to \(update.version)")
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption2)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .background(Color.accentColor.opacity(0.15))
+                .help("A newer version is available")
+                Divider()
+            }
+
             TextField("Search hosts…", text: $query)
                 .textFieldStyle(.plain)
                 .padding(10)
@@ -257,6 +275,13 @@ struct MenuBarView: View {
 
     /// Opens the main window and asks it (via AppModel) to show Settings.
     private func openSettings() {
+        model.pendingShowSettings = true
+        openMainWindow()
+    }
+
+    /// Opens Settings straight to the About tab, where the update install lives.
+    private func openUpdateSettings() {
+        model.pendingSettingsTab = "about"
         model.pendingShowSettings = true
         openMainWindow()
     }

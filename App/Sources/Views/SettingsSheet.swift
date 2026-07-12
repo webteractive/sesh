@@ -7,11 +7,13 @@ import SSHConfigCore
 struct SettingsSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     @State private var path = ConfigPathStore.defaultSuggestion
     @State private var error: String?
     @State private var managedPathDraft = ""
     @State private var managedPathError: String?
     @State private var showResetConfirm = false
+    @State private var selectedTab = "general"
 
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
@@ -23,13 +25,16 @@ struct SettingsSheet: View {
                 .font(.title2.bold())
                 .padding()
 
-            TabView {
+            TabView(selection: $selectedTab) {
                 generalTab
                     .tabItem { Label("General", systemImage: "gearshape") }
+                    .tag("general")
                 sshConfigTab
                     .tabItem { Label("SSH Config", systemImage: "doc.plaintext") }
+                    .tag("ssh")
                 aboutTab
                     .tabItem { Label("About", systemImage: "info.circle") }
+                    .tag("about")
             }
 
             if let error {
@@ -50,6 +55,10 @@ struct SettingsSheet: View {
             path = model.configPath ?? ConfigPathStore.defaultSuggestion
             managedPathDraft = model.managedPath
             model.refreshTerminals()
+            if let tab = model.pendingSettingsTab {
+                selectedTab = tab
+                model.pendingSettingsTab = nil
+            }
         }
         .confirmationDialog("Reset all preferences?", isPresented: $showResetConfirm) {
             Button("Reset", role: .destructive) {
@@ -132,6 +141,10 @@ struct SettingsSheet: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Updates") {
+                updatesContent
+            }
+
             Section {
                 Button("Reset Preferences…", role: .destructive) {
                     showResetConfirm = true
@@ -141,6 +154,61 @@ struct SettingsSheet: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    @ViewBuilder
+    private var updatesContent: some View {
+        switch model.updatePhase {
+        case .idle:
+            Button("Check for Updates") { model.checkForUpdates(explicit: true) }
+        case .checking:
+            HStack {
+                ProgressView().controlSize(.small)
+                Text("Checking…").foregroundStyle(.secondary)
+            }
+        case .upToDate:
+            HStack {
+                Label("You're up to date.", systemImage: "checkmark.circle")
+                    .foregroundStyle(.green)
+                Spacer()
+                Button("Check Again") { model.checkForUpdates(explicit: true) }
+            }
+        case .available(let update):
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Version \(update.version) is available.")
+                HStack {
+                    if update.isInstallable {
+                        Button("Install & Restart") { model.installUpdate() }
+                            .buttonStyle(.borderedProminent)
+                    }
+                    Button("Release Notes") { openURL(update.releasePage) }
+                }
+            }
+        case .downloading(let fraction):
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Downloading…").foregroundStyle(.secondary)
+                ProgressView(value: fraction)
+            }
+        case .verifying, .preparing, .relaunching:
+            HStack {
+                ProgressView().controlSize(.small)
+                Text(installStatusText).foregroundStyle(.secondary)
+            }
+        case .failed(let message):
+            VStack(alignment: .leading, spacing: 8) {
+                Text(message).foregroundStyle(.red).font(.callout)
+                Button("Try Again") { model.checkForUpdates(explicit: true) }
+            }
+        }
+    }
+
+    private var installStatusText: String {
+        switch model.updatePhase {
+        case .verifying: "Verifying…"
+        case .preparing: "Preparing…"
+        case .relaunching: "Restarting…"
+        default: ""
+        }
     }
 
     /// Commits the managed path (validating it) then saves the config path,
