@@ -336,7 +336,7 @@ struct MainWindow: View {
     @ViewBuilder
     private func workspaceHeader(_ section: WorkspaceSection) -> some View {
         let expanded = expandedSections[section.id] ?? true
-        HStack(spacing: 4) {
+        let base = HStack(spacing: 4) {
             Image(systemName: "chevron.right")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -347,20 +347,42 @@ struct MainWindow: View {
         // Clicking anywhere on the header row toggles the section's collapse.
         .contentShape(Rectangle())
         .onTapGesture { expandedSections[section.id] = !expanded }
-        .contextMenu {
-            if let ref = section.workspace {
-                Button("Rename…") {
-                    if let ws = model.workspaces.first(where: { $0.id == ref.id }) {
-                        renameWorkspaceTarget = ws
+
+        if let ref = section.workspace {
+            base
+                .contextMenu {
+                    Button("Rename…") {
+                        if let ws = model.workspaces.first(where: { $0.id == ref.id }) {
+                            renameWorkspaceTarget = ws
+                        }
+                    }
+                    Button("Delete", role: .destructive) {
+                        if let ws = model.workspaces.first(where: { $0.id == ref.id }) {
+                            deleteWorkspaceTarget = ws
+                        }
                     }
                 }
-                Button("Delete", role: .destructive) {
-                    if let ws = model.workspaces.first(where: { $0.id == ref.id }) {
-                        deleteWorkspaceTarget = ws
-                    }
+                // Drag a workspace header onto another to reorder.
+                .draggable(ref.id.uuidString)
+                .dropDestination(for: String.self) { items, _ in
+                    reorderWorkspace(dropped: items.first, onto: ref.id)
                 }
-            }
+        } else {
+            base   // Default header: not draggable/reorderable.
         }
+    }
+
+    /// Move the dragged workspace to just before `targetID` in the order.
+    private func reorderWorkspace(dropped: String?, onto targetID: UUID) -> Bool {
+        guard let draggedID = dropped.flatMap(UUID.init(uuidString:)), draggedID != targetID else { return false }
+        var order = model.workspaces.map(\.id)
+        order.removeAll { $0 == draggedID }
+        if let idx = order.firstIndex(of: targetID) {
+            order.insert(draggedID, at: idx)
+        } else {
+            order.append(draggedID)
+        }
+        return model.reorderWorkspaces(order) == nil
     }
 
 

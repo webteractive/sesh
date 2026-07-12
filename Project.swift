@@ -15,7 +15,7 @@ let project = Project(
             infoPlist: .extendingDefault(with: [
                 "CFBundleName": "Sesh",
                 "CFBundleDisplayName": "Sesh",
-                "CFBundleShortVersionString": "0.8.1",
+                "CFBundleShortVersionString": "0.8.2",
                 "LSMultipleInstancesProhibited": true,
                 "CFBundleIconName": "AppIcon",
                 // Menu-bar-only app: no Dock icon, no window forced at launch.

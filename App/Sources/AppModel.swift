@@ -252,7 +252,21 @@ final class AppModel {
     /// All workspaces, oldest-created first. Empty until the user creates one
     /// (workspace membership is app-only — never written to ssh config).
     var workspaces: [Workspace] {
-        (try? context.fetch(FetchDescriptor<Workspace>(sortBy: [SortDescriptor(\.createdAt)]))) ?? []
+        (try? context.fetch(FetchDescriptor<Workspace>(
+            sortBy: [SortDescriptor(\.sortOrder), SortDescriptor(\.createdAt)]))) ?? []
+    }
+
+    /// Reorder workspaces to match `orderedIDs` (from a sidebar drag). Assigns
+    /// each a fresh `sortOrder` = its index. App-only; no export.
+    func reorderWorkspaces(_ orderedIDs: [UUID]) -> String? {
+        let byID = Dictionary(uniqueKeysWithValues: workspaces.map { ($0.id, $0) })
+        let snapshot = workspaces.map { ($0, $0.sortOrder) }
+        for (index, id) in orderedIDs.enumerated() { byID[id]?.sortOrder = index }
+        if let err = saveOrRollback() {
+            for (ws, order) in snapshot { ws.sortOrder = order }
+            return err
+        }
+        return nil
     }
 
     /// Whether the app should show workspace UI at all (sections, picker).
@@ -281,7 +295,8 @@ final class AppModel {
         if workspaces.contains(where: { $0.name.caseInsensitiveCompare(n) == .orderedSame }) {
             return "A workspace named '\(n)' already exists."
         }
-        context.insert(Workspace(name: n))
+        let nextOrder = (workspaces.map(\.sortOrder).max() ?? -1) + 1
+        context.insert(Workspace(name: n, sortOrder: nextOrder))
         return saveOrRollback()
     }
 
