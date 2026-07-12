@@ -256,8 +256,18 @@ final class AppModel {
             sortBy: [SortDescriptor(\.sortOrder), SortDescriptor(\.createdAt)]))) ?? []
     }
 
-    /// Reorder workspaces to match `orderedIDs` (from a sidebar drag). Assigns
-    /// each a fresh `sortOrder` = its index. App-only; no export.
+    /// Move a workspace one slot up or down in the sidebar order. App-only.
+    func moveWorkspace(_ ws: Workspace, up: Bool) -> String? {
+        var order = workspaces.map(\.id)
+        guard let i = order.firstIndex(of: ws.id) else { return nil }
+        let j = up ? i - 1 : i + 1
+        guard order.indices.contains(j) else { return nil }
+        order.swapAt(i, j)
+        return reorderWorkspaces(order)
+    }
+
+    /// Reorder workspaces to match `orderedIDs`. Assigns each a fresh
+    /// `sortOrder` = its index. App-only; no export.
     func reorderWorkspaces(_ orderedIDs: [UUID]) -> String? {
         let byID = Dictionary(uniqueKeysWithValues: workspaces.map { ($0.id, $0) })
         let snapshot = workspaces.map { ($0, $0.sortOrder) }

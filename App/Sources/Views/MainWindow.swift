@@ -349,8 +349,22 @@ struct MainWindow: View {
         .onTapGesture { expandedSections[section.id] = !expanded }
 
         if let ref = section.workspace {
+            let index = model.workspaces.firstIndex(where: { $0.id == ref.id })
             base
                 .contextMenu {
+                    Button("Move Up") {
+                        if let ws = model.workspaces.first(where: { $0.id == ref.id }) {
+                            _ = model.moveWorkspace(ws, up: true)
+                        }
+                    }
+                    .disabled(index == 0)
+                    Button("Move Down") {
+                        if let ws = model.workspaces.first(where: { $0.id == ref.id }) {
+                            _ = model.moveWorkspace(ws, up: false)
+                        }
+                    }
+                    .disabled(index == model.workspaces.count - 1)
+                    Divider()
                     Button("Rename…") {
                         if let ws = model.workspaces.first(where: { $0.id == ref.id }) {
                             renameWorkspaceTarget = ws
@@ -362,27 +376,9 @@ struct MainWindow: View {
                         }
                     }
                 }
-                // Drag a workspace header onto another to reorder.
-                .draggable(ref.id.uuidString)
-                .dropDestination(for: String.self) { items, _ in
-                    reorderWorkspace(dropped: items.first, onto: ref.id)
-                }
         } else {
-            base   // Default header: not draggable/reorderable.
+            base   // Default header: pinned first, no reorder menu.
         }
-    }
-
-    /// Move the dragged workspace to just before `targetID` in the order.
-    private func reorderWorkspace(dropped: String?, onto targetID: UUID) -> Bool {
-        guard let draggedID = dropped.flatMap(UUID.init(uuidString:)), draggedID != targetID else { return false }
-        var order = model.workspaces.map(\.id)
-        order.removeAll { $0 == draggedID }
-        if let idx = order.firstIndex(of: targetID) {
-            order.insert(draggedID, at: idx)
-        } else {
-            order.append(draggedID)
-        }
-        return model.reorderWorkspaces(order) == nil
     }
 
 
