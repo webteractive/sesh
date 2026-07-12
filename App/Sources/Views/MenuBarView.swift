@@ -186,11 +186,11 @@ struct MenuBarView: View {
                 Menu {
                     ForEach(group.members) { member in
                         if let memberEntry = model.entry(forAlias: member.alias, in: hosts) {
-                            Button("Connect as \(member.label)") {
-                                model.connect(memberEntry)
-                            }
-                            Button("Copy \(member.label)") {
-                                model.copyCommand(memberEntry)
+                            Menu(member.label) {
+                                if member.isConnectable {
+                                    Button("Connect") { model.connect(memberEntry) }
+                                }
+                                Button("Copy") { model.copyCommand(memberEntry) }
                             }
                         }
                     }
