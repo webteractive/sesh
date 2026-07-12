@@ -19,6 +19,12 @@ struct SettingsSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            Text("Settings")
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+            Divider()
+
             TabView {
                 generalTab
                     .tabItem { Label("General", systemImage: "gearshape") }
