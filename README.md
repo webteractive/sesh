@@ -106,3 +106,7 @@ gh release create v<version> dist/Sesh-<version>.dmg dist/Sesh-<version>.dmg.sha
 
 Core logic (parser, writer, exporter, include manager, importer, backups) lives
 in the `SSHConfigCore` package under `Sources/`; the SwiftUI app is under `App/`.
+
+## License
+
+Sesh is open source under the [MIT License](LICENSE).
