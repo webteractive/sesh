@@ -18,77 +18,15 @@ struct SettingsSheet: View {
     }
 
     var body: some View {
-        @Bindable var model = model
         VStack(spacing: 0) {
-            Form {
-                Section {
-                    TextField("Config path", text: $path, prompt: Text("~/.ssh/config"))
-                        .font(.body.monospaced())
-                    TextField("Managed file path", text: $managedPathDraft, prompt: Text("~/.ssh/sesh.conf"))
-                        .font(.body.monospaced())
-                        .onSubmit { commitManagedPath() }
-                    if let managedPathError {
-                        Text(managedPathError).foregroundStyle(.red).font(.callout)
-                    }
-                    includeStatusRow
-                    Button("Import from ~/.ssh/config") {
-                        let result = model.importFromConfig()
-                        if model.pendingError == nil {
-                            model.pendingError = "Imported \(result.added) host\(result.added == 1 ? "" : "s") (\(result.skipped) already present)."
-                        }
-                    }
-                } header: {
-                    Text("SSH Config")
-                } footer: {
-                    Text("The config path tells Sesh where your ~/.ssh/config lives, for linking and importing. The managed file holds Sesh's own hosts and is Included from your config.")
-                }
-
-                Section("Connect") {
-                    if model.selectableTerminals.isEmpty {
-                        Text("No supported terminal detected — Connect uses the system default.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Picker("Open connections in", selection: Binding(
-                            get: { model.preferredTerminal.id },
-                            set: { model.preferredTerminalId = $0 }
-                        )) {
-                            ForEach(model.selectableTerminals) { terminal in
-                                Text(terminal.name).tag(terminal.id)
-                            }
-                        }
-                    }
-                }
-
-                Section("Appearance") {
-                    Picker("Theme", selection: Binding(
-                        get: { model.appearancePreference },
-                        set: { model.appearancePreference = $0 }
-                    )) {
-                        Text("System").tag("system")
-                        Text("Light").tag("light")
-                        Text("Dark").tag("dark")
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                }
-
-                Section("About") {
-                    LabeledContent("Version", value: appVersion)
-                    Text("Sesh manages your SSH connections from the menu bar.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-
-                Section {
-                    Button("Reset Preferences…", role: .destructive) {
-                        showResetConfirm = true
-                    }
-                } footer: {
-                    Text("Restores the terminal choice, appearance, last selection, and managed-file path to defaults. Your linked config path and hosts are kept.")
-                }
+            TabView {
+                generalTab
+                    .tabItem { Label("General", systemImage: "gearshape") }
+                sshConfigTab
+                    .tabItem { Label("SSH Config", systemImage: "doc.plaintext") }
+                aboutTab
+                    .tabItem { Label("About", systemImage: "info.circle") }
             }
-            .formStyle(.grouped)
 
             if let error {
                 Text(error).foregroundStyle(.red).font(.callout)
@@ -105,7 +43,7 @@ struct SettingsSheet: View {
             }
             .padding(16)
         }
-        .frame(width: 480, height: 640)
+        .frame(width: 500, height: 560)
         .onAppear {
             path = model.configPath ?? ConfigPathStore.defaultSuggestion
             managedPathDraft = model.managedPath
@@ -121,6 +59,86 @@ struct SettingsSheet: View {
         } message: {
             Text("The terminal choice, appearance, last selection, and managed-file path return to defaults.")
         }
+    }
+
+    private var generalTab: some View {
+        Form {
+            Section("Connect") {
+                if model.selectableTerminals.isEmpty {
+                    Text("No supported terminal detected — Connect uses the system default.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Picker("Open connections in", selection: Binding(
+                        get: { model.preferredTerminal.id },
+                        set: { model.preferredTerminalId = $0 }
+                    )) {
+                        ForEach(model.selectableTerminals) { terminal in
+                            Text(terminal.name).tag(terminal.id)
+                        }
+                    }
+                }
+            }
+
+            Section("Appearance") {
+                Picker("Theme", selection: Binding(
+                    get: { model.appearancePreference },
+                    set: { model.appearancePreference = $0 }
+                )) {
+                    Text("System").tag("system")
+                    Text("Light").tag("light")
+                    Text("Dark").tag("dark")
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var sshConfigTab: some View {
+        Form {
+            Section {
+                TextField("Config path", text: $path, prompt: Text("~/.ssh/config"))
+                    .font(.body.monospaced())
+                TextField("Managed file path", text: $managedPathDraft, prompt: Text("~/.ssh/sesh.conf"))
+                    .font(.body.monospaced())
+                    .onSubmit { commitManagedPath() }
+                if let managedPathError {
+                    Text(managedPathError).foregroundStyle(.red).font(.callout)
+                }
+                includeStatusRow
+                Button("Import from ~/.ssh/config") {
+                    let result = model.importFromConfig()
+                    if model.pendingError == nil {
+                        model.pendingError = "Imported \(result.added) host\(result.added == 1 ? "" : "s") (\(result.skipped) already present)."
+                    }
+                }
+            } footer: {
+                Text("The config path tells Sesh where your ~/.ssh/config lives, for linking and importing. The managed file holds Sesh's own hosts and is Included from your config.")
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var aboutTab: some View {
+        Form {
+            Section("About") {
+                LabeledContent("Version", value: appVersion)
+                Text("Sesh manages your SSH connections from the menu bar.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Button("Reset Preferences…", role: .destructive) {
+                    showResetConfirm = true
+                }
+            } footer: {
+                Text("Restores the terminal choice, appearance, last selection, and managed-file path to defaults. Your linked config path and hosts are kept.")
+            }
+        }
+        .formStyle(.grouped)
     }
 
     /// Commits the managed path (validating it) then saves the config path,
