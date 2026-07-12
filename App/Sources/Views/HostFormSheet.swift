@@ -34,6 +34,14 @@ struct HostFormSheet: View {
                 Section {
                     TextField("Name", text: $form.displayName, prompt: Text("My Server"))
                     TextField("Host (ip or domain)", text: $form.hostName, prompt: Text("example.com"))
+                    if model.isWorkspaceMode {
+                        Picker("Workspace", selection: $form.workspaceID) {
+                            Text("Default").tag(UUID?.none)
+                            ForEach(model.workspaces, id: \.id) { ws in
+                                Text(ws.name).tag(UUID?.some(ws.id))
+                            }
+                        }
+                    }
                 }
 
                 Section("Credentials") {
@@ -140,6 +148,7 @@ struct HostFormSheet: View {
         return HostFormModel(
             displayName: entry.displayName ?? entry.host,
             hostName: defaultMember.properties.first("HostName") ?? "",
-            rows: rows)
+            rows: rows,
+            workspaceID: defaultMember.workspaceID)
     }
 }

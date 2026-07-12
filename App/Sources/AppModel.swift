@@ -12,7 +12,7 @@ final class AppModel {
             let dir = URL.applicationSupportDirectory.appending(path: "Sesh", directoryHint: .isDirectory)
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             let config = ModelConfiguration(url: dir.appending(path: "Sesh.store"))
-            return try ModelContainer(for: HostEntry.self, configurations: config)
+            return try ModelContainer(for: HostEntry.self, Workspace.self, configurations: config)
         } catch {
             fatalError("Failed to create SwiftData container: \(error)")
         }
@@ -247,6 +247,96 @@ final class AppModel {
         hosts.first { $0.host == alias }
     }
 
+    // MARK: - Workspaces
+
+    /// All workspaces, oldest-created first. Empty until the user creates one
+    /// (workspace membership is app-only — never written to ssh config).
+    var workspaces: [Workspace] {
+        (try? context.fetch(FetchDescriptor<Workspace>(sortBy: [SortDescriptor(\.createdAt)]))) ?? []
+    }
+
+    /// Whether the app should show workspace UI at all (sections, picker).
+    var isWorkspaceMode: Bool { !workspaces.isEmpty }
+
+    /// Groups `hosts` into `WorkspaceSection`s (Default first, then each
+    /// workspace in creation order).
+    func sections(from hosts: [HostEntry]) -> [WorkspaceSection] {
+        let rows = hosts.map { e in
+            HostRow(alias: e.host, groupName: e.groupName,
+                    user: e.properties.first("User"), identityFile: e.properties.first("IdentityFile"),
+                    isDefault: e.isDefaultProfile, isConnectable: e.isConnectable,
+                    displayName: e.displayName)
+        }
+        var widByAlias: [String: UUID] = [:]
+        for e in hosts { if let w = e.workspaceID { widByAlias[e.host] = w } }
+        let refs = workspaces.map { WorkspaceRef(id: $0.id, name: $0.name) }
+        return WorkspaceSectioning.sections(rows: rows, workspaceIDByAlias: widByAlias, workspaces: refs)
+    }
+
+    /// Creates a new workspace named `name`. Returns an error message, or nil
+    /// on success. Never touches ssh config — workspaces are app-only.
+    func createWorkspace(name: String) -> String? {
+        let n = name.trimmingCharacters(in: .whitespaces)
+        if n.isEmpty { return "Workspace name is required." }
+        if workspaces.contains(where: { $0.name.caseInsensitiveCompare(n) == .orderedSame }) {
+            return "A workspace named '\(n)' already exists."
+        }
+        context.insert(Workspace(name: n))
+        return saveOrRollback()
+    }
+
+    /// Renames `ws` to `name`. Returns an error message, or nil on success.
+    func renameWorkspace(_ ws: Workspace, to name: String) -> String? {
+        let n = name.trimmingCharacters(in: .whitespaces)
+        if n.isEmpty { return "Workspace name is required." }
+        if workspaces.contains(where: { $0.id != ws.id && $0.name.caseInsensitiveCompare(n) == .orderedSame }) {
+            return "A workspace named '\(n)' already exists."
+        }
+        let old = ws.name
+        ws.name = n
+        if let e = saveOrRollback() { ws.name = old; return e }
+        return nil
+    }
+
+    /// Deletes `ws`, reassigning any of its hosts back to Default
+    /// (`workspaceID = nil`) first — hosts themselves are never deleted.
+    /// Returns an error message, or nil on success.
+    func deleteWorkspace(_ ws: Workspace) -> String? {
+        let id = ws.id
+        let affected = (try? context.fetch(FetchDescriptor<HostEntry>()))?.filter { $0.workspaceID == id } ?? []
+        let snapshot = affected.map { ($0, $0.workspaceID) }
+        for e in affected { e.workspaceID = nil }        // reassign to Default (never delete hosts)
+        context.delete(ws)
+        if let err = saveOrRollback() {
+            for (e, w) in snapshot { e.workspaceID = w }
+            return err
+        }
+        return nil
+    }
+
+    /// Move a whole logical host (all members of the group whose default alias
+    /// is `groupDefaultAlias`) to a workspace (nil = Default).
+    func move(groupDefaultAlias alias: String, toWorkspace id: UUID?) -> String? {
+        let all = (try? context.fetch(FetchDescriptor<HostEntry>())) ?? []
+        guard let anchor = all.first(where: { $0.host == alias }) else { return nil }
+        let key = anchor.groupName ?? anchor.host
+        let members = all.filter { ($0.groupName ?? $0.host) == key }
+        let snapshot = members.map { ($0, $0.workspaceID) }
+        for m in members { m.workspaceID = id }
+        if let err = saveOrRollback() {
+            for (m, w) in snapshot { m.workspaceID = w }
+            return err
+        }
+        return nil
+    }
+
+    /// Saves the context, rolling back and stashing `pendingError` on failure.
+    /// Returns an error message, or nil on success.
+    private func saveOrRollback() -> String? {
+        do { try context.save(); return nil }
+        catch { context.rollback(); pendingError = error.localizedDescription; return error.localizedDescription }
+    }
+
     /// Applies a `HostFormModel` from the new host form: reconciles it against
     /// the edited group's current members (nil `groupID` = create), inserts,
     /// updates, or deletes `HostEntry`s per the resulting plan, then exports.
@@ -272,7 +362,7 @@ final class AppModel {
         // Snapshot for rollback of dirty in-memory fields (SwiftData's
         // rollback() discards pending inserts/deletes but doesn't reliably
         // revert property changes on already-persisted objects).
-        let snapshot = members.map { ($0, $0.host, $0.groupName, $0.isDefaultProfile, $0.displayName, $0.properties, $0.updatedAt) }
+        let snapshot = members.map { ($0, $0.host, $0.groupName, $0.isDefaultProfile, $0.displayName, $0.properties, $0.updatedAt, $0.workspaceID) }
 
         for alias in plan.deleteAliases { if let e = byAlias[alias] { context.delete(e) } }
         for u in plan.upserts {
@@ -287,6 +377,7 @@ final class AppModel {
             entry.isDefaultProfile = u.isDefault
             entry.displayName = form.displayName.trimmingCharacters(in: .whitespaces)
             entry.updatedAt = .now
+            entry.workspaceID = form.workspaceID
         }
         do {
             try context.save()
@@ -294,13 +385,14 @@ final class AppModel {
             return nil
         } catch {
             context.rollback()
-            for (e, host, group, isDefault, name, properties, updatedAt) in snapshot {
+            for (e, host, group, isDefault, name, properties, updatedAt, workspaceID) in snapshot {
                 e.host = host
                 e.groupName = group
                 e.isDefaultProfile = isDefault
                 e.displayName = name
                 e.properties = properties
                 e.updatedAt = updatedAt
+                e.workspaceID = workspaceID
             }
             return error.localizedDescription
         }

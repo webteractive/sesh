@@ -50,8 +50,11 @@ public struct HostFormModel: Equatable, Sendable {
     public var displayName: String
     public var hostName: String
     public var rows: [CredentialRow]
-    public init(displayName: String, hostName: String, rows: [CredentialRow]) {
-        self.displayName = displayName; self.hostName = hostName; self.rows = rows
+    /// App-only workspace membership (nil = Default). Never written to ssh
+    /// config — applied to the resulting `HostEntry`s after the form saves.
+    public var workspaceID: UUID?
+    public init(displayName: String, hostName: String, rows: [CredentialRow], workspaceID: UUID? = nil) {
+        self.displayName = displayName; self.hostName = hostName; self.rows = rows; self.workspaceID = workspaceID
     }
 
     public func validationError() -> String? {
