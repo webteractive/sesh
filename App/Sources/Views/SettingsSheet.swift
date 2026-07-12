@@ -1,9 +1,9 @@
 import SwiftUI
 import SSHConfigCore
 
-/// Lets the user revisit the SSH config path after first run. Pattern-matches
-/// FirstRunSheet but, unlike that mandatory onboarding sheet, allows interactive
-/// dismissal and offers an explicit Cancel.
+/// Grouped settings for the SSH config paths, the Connect terminal, appearance,
+/// and app info. Interactive-dismissable (unlike the mandatory FirstRunSheet)
+/// with explicit Cancel/Save.
 struct SettingsSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -11,85 +11,134 @@ struct SettingsSheet: View {
     @State private var error: String?
     @State private var managedPathDraft = ""
     @State private var managedPathError: String?
+    @State private var showResetConfirm = false
+
+    private var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
+    }
 
     var body: some View {
         @Bindable var model = model
-        VStack(alignment: .leading, spacing: 14) {
-            Label("Settings", systemImage: "gearshape")
-                .font(.title2.bold())
-            Text("The SSH config path tells Sesh where your ~/.ssh/config lives, for linking and importing.")
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+        VStack(spacing: 0) {
+            Form {
+                Section {
+                    TextField("Config path", text: $path, prompt: Text("~/.ssh/config"))
+                        .font(.body.monospaced())
+                    TextField("Managed file path", text: $managedPathDraft, prompt: Text("~/.ssh/sesh.conf"))
+                        .font(.body.monospaced())
+                        .onSubmit { commitManagedPath() }
+                    if let managedPathError {
+                        Text(managedPathError).foregroundStyle(.red).font(.callout)
+                    }
+                    includeStatusRow
+                    Button("Import from ~/.ssh/config") {
+                        let result = model.importFromConfig()
+                        if model.pendingError == nil {
+                            model.pendingError = "Imported \(result.added) host\(result.added == 1 ? "" : "s") (\(result.skipped) already present)."
+                        }
+                    }
+                } header: {
+                    Text("SSH Config")
+                } footer: {
+                    Text("The config path tells Sesh where your ~/.ssh/config lives, for linking and importing. The managed file holds Sesh's own hosts and is Included from your config.")
+                }
 
-            TextField("Config path", text: $path, prompt: Text("~/.ssh/config"))
-                .font(.body.monospaced())
-
-            TextField("Managed file path", text: $managedPathDraft, prompt: Text("~/.ssh/sesh.conf"))
-                .font(.body.monospaced())
-                .onSubmit { commitManagedPath() }
-
-            if let managedPathError {
-                Text(managedPathError).foregroundStyle(.red).font(.callout)
-            }
-
-            includeStatusRow
-
-            HStack {
-                Button("Import from ~/.ssh/config") {
-                    let result = model.importFromConfig()
-                    if model.pendingError == nil {
-                        model.pendingError = "Imported \(result.added) host\(result.added == 1 ? "" : "s") (\(result.skipped) already present)."
+                Section("Connect") {
+                    if model.selectableTerminals.isEmpty {
+                        Text("No supported terminal detected — Connect uses the system default.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Picker("Open connections in", selection: Binding(
+                            get: { model.preferredTerminal.id },
+                            set: { model.preferredTerminalId = $0 }
+                        )) {
+                            ForEach(model.selectableTerminals) { terminal in
+                                Text(terminal.name).tag(terminal.id)
+                            }
+                        }
                     }
                 }
-                Spacer()
-            }
 
-            if model.selectableTerminals.isEmpty {
-                Text("No supported terminal detected — Connect uses the system default.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            } else {
-                Picker("Connect with", selection: Binding(
-                    get: { model.preferredTerminal.id },
-                    set: { model.preferredTerminalId = $0 }
-                )) {
-                    ForEach(model.selectableTerminals) { terminal in
-                        Text(terminal.name).tag(terminal.id)
+                Section("Appearance") {
+                    Picker("Theme", selection: Binding(
+                        get: { model.appearancePreference },
+                        set: { model.appearancePreference = $0 }
+                    )) {
+                        Text("System").tag("system")
+                        Text("Light").tag("light")
+                        Text("Dark").tag("dark")
                     }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
                 }
-                .pickerStyle(.menu)
+
+                Section("About") {
+                    LabeledContent("Version", value: appVersion)
+                    Text("Sesh manages your SSH connections from the menu bar.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section {
+                    Button("Reset Preferences…", role: .destructive) {
+                        showResetConfirm = true
+                    }
+                } footer: {
+                    Text("Restores the terminal choice, appearance, last selection, and managed-file path to defaults. Your linked config path and hosts are kept.")
+                }
             }
+            .formStyle(.grouped)
 
             if let error {
                 Text(error).foregroundStyle(.red).font(.callout)
+                    .padding(.horizontal, 20)
             }
 
+            Divider()
             HStack {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.escape)
                 Spacer()
-                Button("Save") {
-                    if let message = model.saveConfigPath(path) {
-                        error = message
-                    } else {
-                        dismiss()
-                    }
-                }
-                .keyboardShortcut(.return)
-                .buttonStyle(.borderedProminent)
+                Button("Save") { save() }
+                    .keyboardShortcut(.return)
+                    .buttonStyle(.borderedProminent)
             }
+            .padding(16)
         }
-        .padding(24)
-        .frame(width: 460)
+        .frame(width: 480, height: 640)
         .onAppear {
             path = model.configPath ?? ConfigPathStore.defaultSuggestion
             managedPathDraft = model.managedPath
             model.refreshTerminals()
         }
+        .confirmationDialog("Reset all preferences?", isPresented: $showResetConfirm) {
+            Button("Reset", role: .destructive) {
+                model.resetPreferences()
+                managedPathDraft = model.managedPath
+                managedPathError = nil
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The terminal choice, appearance, last selection, and managed-file path return to defaults.")
+        }
     }
 
-    /// Commits the managed-path draft on submit: trims, rejects empty, and
-    /// rejects a value that would alias the real config path (which would
-    /// let export overwrite ~/.ssh/config instead of the managed fragment).
+    /// Commits the managed path (validating it) then saves the config path,
+    /// dismissing only when both succeed. Committing here — not just on the
+    /// field's onSubmit — means a typed-but-not-Entered path still saves.
+    private func save() {
+        commitManagedPath()
+        guard managedPathError == nil else { return }
+        if let message = model.saveConfigPath(path) {
+            error = message
+        } else {
+            dismiss()
+        }
+    }
+
+    /// Commits the managed-path draft: trims, rejects empty, and rejects a value
+    /// that would alias the real config path (which would let export overwrite
+    /// ~/.ssh/config instead of the managed fragment).
     private func commitManagedPath() {
         let trimmed = managedPathDraft.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else {
@@ -110,17 +159,14 @@ struct SettingsSheet: View {
     @ViewBuilder
     private var includeStatusRow: some View {
         if model.managedFileActive {
-            Label("Linked into ~/.ssh/config ✓", systemImage: "checkmark.circle")
+            Label("Linked into ~/.ssh/config", systemImage: "checkmark.circle")
                 .foregroundStyle(.green)
                 .font(.callout)
         } else {
-            HStack {
-                Button("Link into ~/.ssh/config") {
-                    if let message = model.linkInclude() {
-                        error = message
-                    }
+            Button("Link into ~/.ssh/config") {
+                if let message = model.linkInclude() {
+                    error = message
                 }
-                Spacer()
             }
         }
     }

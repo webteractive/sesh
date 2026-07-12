@@ -130,6 +130,7 @@ struct MenuBarView: View {
         }
         .frame(width: 300)
         .onAppear {
+            model.applyAppearance()
             query = ""
             selectedIndex = 0
             // The window panel isn't key the instant it appears; focusing on the

@@ -102,7 +102,41 @@ final class AppModel {
 
     func onLaunch() {
         refreshTerminals()
+        applyAppearance()
         showFirstRun = (configPath == nil)
+    }
+
+    static let appearanceKey = "appearancePreference"
+
+    /// Window appearance override: "system", "light", or "dark".
+    var appearancePreference: String {
+        get { UserDefaults.standard.string(forKey: Self.appearanceKey) ?? "system" }
+        set {
+            UserDefaults.standard.set(newValue, forKey: Self.appearanceKey)
+            applyAppearance()
+        }
+    }
+
+    /// Applies the stored appearance to the whole app (all windows and the
+    /// menu-bar panel); nil follows the system setting.
+    func applyAppearance() {
+        switch appearancePreference {
+        case "light": NSApp.appearance = NSAppearance(named: .aqua)
+        case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
+        default: NSApp.appearance = nil
+        }
+    }
+
+    /// Clears stored app preferences (terminal pick, appearance, last selection,
+    /// managed-file path) back to their defaults. The linked SSH config path is
+    /// left intact so the managed include isn't silently broken.
+    func resetPreferences() {
+        let defaults = UserDefaults.standard
+        for key in [Self.preferredTerminalKey, Self.appearanceKey, Self.lastSelectedAliasKey, Self.managedPathKey] {
+            defaults.removeObject(forKey: key)
+        }
+        applyAppearance()
+        refreshTerminals()
     }
 
     func refreshTerminals() {
