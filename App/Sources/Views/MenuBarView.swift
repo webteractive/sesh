@@ -234,9 +234,6 @@ struct MenuBarView: View {
 
     private var footer: some View {
         HStack {
-            Button("Export") { model.exportNow() }
-                .help("Re-write the managed config file from the store")
-            Spacer()
             Button("Open Sesh") { openMainWindow() }
             Spacer()
             Button("Quit") { NSApp.terminate(nil) }
