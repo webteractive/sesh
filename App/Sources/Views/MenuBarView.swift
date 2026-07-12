@@ -242,6 +242,7 @@ struct MenuBarView: View {
     private func openMainWindow() {
         openWindow(id: "main")
         NSApp.activate(ignoringOtherApps: true)
+        dismiss()   // close the menu bar panel once the window is up
     }
 
     private func subtitle(_ entry: HostEntry) -> String {
