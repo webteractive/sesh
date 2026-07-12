@@ -7,6 +7,10 @@ struct MainWindow: View {
     @Environment(\.modelContext) private var context
     @Environment(\.openWindow) private var openWindow
     @Query(sort: \HostEntry.updatedAt, order: .reverse) private var hosts: [HostEntry]
+    // Not read directly — its presence makes SwiftUI re-render the sidebar
+    // (sections come from `model.sections(from:)`) whenever a workspace is
+    // created, renamed, or deleted.
+    @Query private var workspaceEntities: [Workspace]
     @State private var search = ""
     @State private var selection: Set<PersistentIdentifier> = []
     @State private var formMode: FormMode?
@@ -15,6 +19,11 @@ struct MainWindow: View {
     @State private var multiDeleteRequest: Set<PersistentIdentifier>?
     @State private var showPalette = false
     @State private var removeProfileRequest: (entry: HostEntry, members: [HostEntry])?
+    @State private var showNewWorkspace = false
+    @State private var pendingMoveAlias: String?
+    @State private var renameWorkspaceTarget: Workspace?
+    @State private var deleteWorkspaceTarget: Workspace?
+    @State private var expandedSections: [String: Bool] = [:]
 
     private var filtered: [HostEntry] {
         guard !search.isEmpty else { return hosts }
@@ -40,6 +49,12 @@ struct MainWindow: View {
         return model.groups(from: expanded)
     }
 
+    /// Workspace-mode sections, computed from the search-filtered host set so
+    /// a search narrows rows within each section rather than only in a flat list.
+    private var workspaceSections: [WorkspaceSection] {
+        model.sections(from: filtered)
+    }
+
     var body: some View {
         @Bindable var model = model
         NavigationSplitView {
@@ -47,33 +62,29 @@ struct MainWindow: View {
                 HStack(spacing: 8) {
                     TextField("Search hosts", text: $search)
                         .textFieldStyle(.roundedBorder)
-                    Button {
-                        formMode = .create
+                    Menu {
+                        Button("New Host") { formMode = .create }
+                        Button("New Workspace") { showNewWorkspace = true }
                     } label: {
                         Image(systemName: "plus")
                     }
-                    .buttonStyle(.borderless)
-                    .keyboardShortcut("n", modifiers: .command)
-                    .help("New Host")
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .help("New Host or Workspace")
                 }
                 .padding(8)
 
                 List(selection: $selection) {
-                    ForEach(sidebarGroups) { group in
-                        if let entry = model.entry(forAlias: group.defaultMember.alias, in: hosts) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(group.title).font(.headline)
-                                Text(hostSubtitle(group)).font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .tag(entry.persistentModelID)
-                            .contextMenu {
-                                Button("Edit") { formMode = .edit(entry) }
-                                Button("Duplicate") { duplicate(entry) }
-                                Divider()
-                                Button("Delete", role: .destructive) { requestDeleteGroup(group) }
+                    if model.isWorkspaceMode {
+                        ForEach(workspaceSections) { section in
+                            Section(isExpanded: sectionExpanded(section.id)) {
+                                ForEach(section.groups) { group in hostRow(group) }
+                            } header: {
+                                workspaceHeader(section)
                             }
                         }
+                    } else {
+                        ForEach(sidebarGroups) { group in hostRow(group) }
                     }
                 }
             }
@@ -114,6 +125,41 @@ struct MainWindow: View {
         }
         .sheet(isPresented: $showSettings) {
             SettingsSheet()
+        }
+        .sheet(isPresented: $showNewWorkspace, onDismiss: { pendingMoveAlias = nil }) {
+            WorkspaceNameSheet(mode: .create, onSaved: { ws in
+                if let alias = pendingMoveAlias {
+                    if let message = model.move(groupDefaultAlias: alias, toWorkspace: ws.id) {
+                        model.pendingError = message
+                    }
+                    pendingMoveAlias = nil
+                }
+            })
+        }
+        .sheet(isPresented: .init(
+            get: { renameWorkspaceTarget != nil },
+            set: { if !$0 { renameWorkspaceTarget = nil } }
+        )) {
+            if let ws = renameWorkspaceTarget {
+                WorkspaceNameSheet(mode: .rename(ws))
+            }
+        }
+        .confirmationDialog(
+            "Delete workspace '\(deleteWorkspaceTarget?.name ?? "")'?",
+            isPresented: .init(
+                get: { deleteWorkspaceTarget != nil },
+                set: { if !$0 { deleteWorkspaceTarget = nil } }
+            )
+        ) {
+            Button("Delete", role: .destructive) {
+                if let ws = deleteWorkspaceTarget, let message = model.deleteWorkspace(ws) {
+                    model.pendingError = message
+                }
+                deleteWorkspaceTarget = nil
+            }
+            Button("Cancel", role: .cancel) { deleteWorkspaceTarget = nil }
+        } message: {
+            Text("Hosts in this workspace move back to Default.")
         }
         .alert("Sesh", isPresented: .init(
             get: { model.pendingError != nil },
@@ -195,6 +241,9 @@ struct MainWindow: View {
             Button("") { showPalette.toggle() }
                 .keyboardShortcut("k", modifiers: .command)
                 .hidden()
+            Button("") { formMode = .create }
+                .keyboardShortcut("n", modifiers: .command)
+                .hidden()
         }
     }
 
@@ -234,6 +283,75 @@ struct MainWindow: View {
     private func hostSubtitle(_ group: HostGroupView) -> String {
         guard let entry = model.entry(forAlias: group.defaultMember.alias, in: hosts) else { return "—" }
         return entry.properties.first("HostName") ?? "—"
+    }
+
+    /// A single sidebar row: Name + IP, tagged for selection, with the
+    /// Edit/Duplicate/Delete context menu plus a "Move to Workspace" submenu.
+    @ViewBuilder
+    private func hostRow(_ group: HostGroupView) -> some View {
+        if let entry = model.entry(forAlias: group.defaultMember.alias, in: hosts) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(group.title).font(.headline)
+                Text(hostSubtitle(group)).font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .tag(entry.persistentModelID)
+            .contextMenu {
+                Button("Edit") { formMode = .edit(entry) }
+                Button("Duplicate") { duplicate(entry) }
+                Menu("Move to Workspace") {
+                    Button("Default") { move(group, toWorkspace: nil) }
+                    ForEach(model.workspaces, id: \.id) { ws in
+                        Button(ws.name) { move(group, toWorkspace: ws.id) }
+                    }
+                    Divider()
+                    Button("New Workspace…") {
+                        pendingMoveAlias = group.defaultMember.alias
+                        showNewWorkspace = true
+                    }
+                }
+                Divider()
+                Button("Delete", role: .destructive) { requestDeleteGroup(group) }
+            }
+        }
+    }
+
+    private func move(_ group: HostGroupView, toWorkspace id: UUID?) {
+        if let message = model.move(groupDefaultAlias: group.defaultMember.alias, toWorkspace: id) {
+            model.pendingError = message
+        }
+    }
+
+    /// A sidebar section header: plain title for Default, with a
+    /// Rename…/Delete context menu for a real workspace.
+    @ViewBuilder
+    private func workspaceHeader(_ section: WorkspaceSection) -> some View {
+        if let ref = section.workspace {
+            Text(section.title)
+                .contextMenu {
+                    Button("Rename…") {
+                        if let ws = model.workspaces.first(where: { $0.id == ref.id }) {
+                            renameWorkspaceTarget = ws
+                        }
+                    }
+                    Button("Delete", role: .destructive) {
+                        if let ws = model.workspaces.first(where: { $0.id == ref.id }) {
+                            deleteWorkspaceTarget = ws
+                        }
+                    }
+                }
+        } else {
+            Text(section.title)
+        }
+    }
+
+    /// Per-section collapse state for the sidebar's collapsible `Section`s,
+    /// keyed by `WorkspaceSection.id` (defaults to expanded).
+    private func sectionExpanded(_ id: String) -> Binding<Bool> {
+        Binding(
+            get: { expandedSections[id] ?? true },
+            set: { expandedSections[id] = $0 }
+        )
     }
 
     /// Laravel's DuplicateSshConfigAction: unique "-copy-N" suffix, then sync.

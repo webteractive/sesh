@@ -7,6 +7,10 @@ struct MenuBarView: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \HostEntry.updatedAt, order: .reverse) private var hosts: [HostEntry]
+    // Not read directly — its presence makes SwiftUI re-render this panel
+    // (sections come from `model.sections(from:)`) whenever a workspace is
+    // created, renamed, or deleted.
+    @Query private var workspaceEntities: [Workspace]
 
     @State private var query = ""
     @State private var selectedIndex = 0
@@ -14,6 +18,7 @@ struct MenuBarView: View {
 
     private static let recentLimit = 10
     private static let rowHeight: CGFloat = 44
+    private static let sectionHeaderHeight: CGFloat = 22
 
     /// Empty query → the 10 most-recently-updated hosts (quick access).
     /// A query → fuzzy search across all hosts.
@@ -37,6 +42,23 @@ struct MenuBarView: View {
         model.groups(from: filtered)
     }
 
+    /// Workspace-mode sections over the same `filtered` rows (Default first,
+    /// omitted when empty; each workspace always present).
+    private var sections: [WorkspaceSection] {
+        model.sections(from: filtered)
+    }
+
+    /// Sections with at least one row — the ones actually rendered.
+    private var nonEmptySections: [WorkspaceSection] {
+        sections.filter { !$0.groups.isEmpty }
+    }
+
+    /// The single flat top-to-bottom ordering used for keyboard selection and
+    /// Return-to-activate, regardless of whether rows are shown sectioned or flat.
+    private var displayGroups: [HostGroupView] {
+        model.isWorkspaceMode ? nonEmptySections.flatMap(\.groups) : groups
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             TextField("Search hosts…", text: $query)
@@ -49,10 +71,30 @@ struct MenuBarView: View {
                 Text("No hosts yet")
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 16)
-            } else if groups.isEmpty {
+            } else if filtered.isEmpty {
                 Text("No matches")
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 16)
+            } else if model.isWorkspaceMode {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(nonEmptySections) { section in
+                            Text(section.title)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 10)
+                                .padding(.top, 6)
+                                .padding(.bottom, 2)
+                            ForEach(section.groups) { group in
+                                groupRow(group, selected: isSelected(group))
+                            }
+                        }
+                    }
+                }
+                // See the flat-mode note below on why a definite height is required.
+                .frame(height: min(
+                    CGFloat(displayGroups.count) * Self.rowHeight + CGFloat(nonEmptySections.count) * Self.sectionHeaderHeight,
+                    8 * Self.rowHeight + CGFloat(nonEmptySections.count) * Self.sectionHeaderHeight))
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0) {
@@ -81,7 +123,7 @@ struct MenuBarView: View {
         }
         .onChange(of: query) { _, _ in selectedIndex = 0 }
         .onKeyPress(.downArrow) {
-            selectedIndex = min(selectedIndex + 1, max(0, groups.count - 1)); return .handled
+            selectedIndex = min(selectedIndex + 1, max(0, displayGroups.count - 1)); return .handled
         }
         .onKeyPress(.upArrow) {
             selectedIndex = max(selectedIndex - 1, 0); return .handled
@@ -94,9 +136,15 @@ struct MenuBarView: View {
         }
     }
 
+    /// Whether `group` is the row at `selectedIndex` within `displayGroups`
+    /// (the flat top-to-bottom order keyboard navigation walks, sectioned or not).
+    private func isSelected(_ group: HostGroupView) -> Bool {
+        displayGroups.indices.contains(selectedIndex) && displayGroups[selectedIndex].id == group.id
+    }
+
     private func activateSelected() {
-        guard groups.indices.contains(selectedIndex) else { return }
-        let member = groups[selectedIndex].defaultMember
+        guard displayGroups.indices.contains(selectedIndex) else { return }
+        let member = displayGroups[selectedIndex].defaultMember
         guard let entry = model.entry(forAlias: member.alias, in: hosts) else { return }
         // Enter opens in the terminal when possible; wildcard/pattern hosts
         // (no single connectable alias) fall back to copying the command.
