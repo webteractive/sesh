@@ -35,24 +35,31 @@ struct MainWindow: View {
         }
     }
 
-    /// Groups for the sidebar. When searching, expands the filtered set to
-    /// include every sibling of a matched entry's group so a match on one
-    /// alias doesn't collapse the whole group to a lone row.
-    private var sidebarGroups: [HostGroupView] {
-        guard !search.isEmpty else { return model.groups(from: hosts) }
+    /// The search-filtered host set, widened so a match on one profile of a
+    /// multi-profile host pulls in every sibling sharing its `groupName`
+    /// instead of rendering that group as a lone orphaned row. Empty search
+    /// returns every host untouched. Feeds both the flat sidebar and the
+    /// workspace-mode sections so search behaves consistently in either mode.
+    private var searchWidenedHosts: [HostEntry] {
+        guard !search.isEmpty else { return hosts }
         let matched = filtered
         let matchedGroups = Set(matched.compactMap(\.groupName))
-        let expanded = hosts.filter { h in
+        return hosts.filter { h in
             matched.contains(where: { $0.persistentModelID == h.persistentModelID })
                 || (h.groupName.map(matchedGroups.contains) ?? false)
         }
-        return model.groups(from: expanded)
     }
 
-    /// Workspace-mode sections, computed from the search-filtered host set so
-    /// a search narrows rows within each section rather than only in a flat list.
+    /// Groups for the sidebar, built from the widened search set.
+    private var sidebarGroups: [HostGroupView] {
+        model.groups(from: searchWidenedHosts)
+    }
+
+    /// Workspace-mode sections, computed from the same widened search set so
+    /// a search narrows rows within each section without orphaning multi-profile
+    /// groups, matching the flat-mode sidebar's behavior.
     private var workspaceSections: [WorkspaceSection] {
-        model.sections(from: filtered)
+        model.sections(from: searchWidenedHosts)
     }
 
     var body: some View {

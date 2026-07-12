@@ -36,16 +36,31 @@ struct MenuBarView: View {
             .map(\.0)
     }
 
-    /// `filtered` grouped for display — a multi-profile host collapses to one
-    /// row with a profile chooser instead of one row per alias.
-    private var groups: [HostGroupView] {
-        model.groups(from: filtered)
+    /// `filtered`, widened so a query match on one profile of a multi-profile
+    /// host pulls in every sibling sharing its `groupName` instead of
+    /// rendering that group as a lone orphaned row. An empty query leaves the
+    /// recent-10 quick-access list untouched — there's no search match to
+    /// widen around.
+    private var searchWidenedHosts: [HostEntry] {
+        guard !query.isEmpty else { return filtered }
+        let matched = filtered
+        let matchedGroups = Set(matched.compactMap(\.groupName))
+        return hosts.filter { h in
+            matched.contains(where: { $0.persistentModelID == h.persistentModelID })
+                || (h.groupName.map(matchedGroups.contains) ?? false)
+        }
     }
 
-    /// Workspace-mode sections over the same `filtered` rows (Default first,
+    /// `searchWidenedHosts` grouped for display — a multi-profile host collapses
+    /// to one row with a profile chooser instead of one row per alias.
+    private var groups: [HostGroupView] {
+        model.groups(from: searchWidenedHosts)
+    }
+
+    /// Workspace-mode sections over the same widened rows (Default first,
     /// omitted when empty; each workspace always present).
     private var sections: [WorkspaceSection] {
-        model.sections(from: filtered)
+        model.sections(from: searchWidenedHosts)
     }
 
     /// Sections with at least one row — the ones actually rendered.
