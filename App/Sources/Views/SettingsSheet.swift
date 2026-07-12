@@ -18,12 +18,10 @@ struct SettingsSheet: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(alignment: .leading, spacing: 0) {
             Text("Settings")
-                .font(.headline)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-            Divider()
+                .font(.title2.bold())
+                .padding()
 
             TabView {
                 generalTab
@@ -35,21 +33,19 @@ struct SettingsSheet: View {
             }
 
             if let error {
-                Text(error).foregroundStyle(.red).font(.callout)
-                    .padding(.horizontal, 20)
+                Text(error).foregroundStyle(.red).font(.callout).padding(.horizontal)
             }
 
-            Divider()
             HStack {
-                Button("Cancel") { dismiss() }.keyboardShortcut(.escape)
                 Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.escape)
                 Button("Save") { save() }
                     .keyboardShortcut(.return)
                     .buttonStyle(.borderedProminent)
             }
-            .padding(16)
+            .padding()
         }
-        .frame(width: 500, height: 560)
+        .frame(width: 520, height: 560)
         .onAppear {
             path = model.configPath ?? ConfigPathStore.defaultSuggestion
             managedPathDraft = model.managedPath
