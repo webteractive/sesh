@@ -11,7 +11,7 @@ struct MainWindow: View {
     @State private var selection: Set<PersistentIdentifier> = []
     @State private var formMode: FormMode?
     @State private var showSettings = false
-    @State private var deleteRequest: HostEntry?
+    @State private var deleteRequest: HostGroupView?
     @State private var multiDeleteRequest: Set<PersistentIdentifier>?
     @State private var showPalette = false
     @State private var removeProfileRequest: (entry: HostEntry, members: [HostEntry])?
@@ -20,6 +20,7 @@ struct MainWindow: View {
         guard !search.isEmpty else { return hosts }
         return hosts.filter {
             $0.host.localizedCaseInsensitiveContains(search)
+                || ($0.displayName ?? "").localizedCaseInsensitiveContains(search)
                 || ($0.properties.first("HostName") ?? "").localizedCaseInsensitiveContains(search)
                 || ($0.properties.first("User") ?? "").localizedCaseInsensitiveContains(search)
         }
@@ -42,22 +43,40 @@ struct MainWindow: View {
     var body: some View {
         @Bindable var model = model
         NavigationSplitView {
-            List(selection: $selection) {
-                ForEach(sidebarGroups) { group in
-                    if group.isMultiProfile {
-                        DisclosureGroup {
-                            ForEach(group.members) { member in
-                                memberRow(member)
+            VStack(spacing: 0) {
+                HStack(spacing: 8) {
+                    TextField("Search hosts", text: $search)
+                        .textFieldStyle(.roundedBorder)
+                    Button {
+                        formMode = .create
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .buttonStyle(.borderless)
+                    .keyboardShortcut("n", modifiers: .command)
+                    .help("New Host")
+                }
+                .padding(8)
+
+                List(selection: $selection) {
+                    ForEach(sidebarGroups) { group in
+                        if let entry = model.entry(forAlias: group.defaultMember.alias, in: hosts) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(group.title).font(.headline)
+                                Text(hostSubtitle(group)).font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
-                        } label: {
-                            groupLabel(group)
+                            .tag(entry.persistentModelID)
+                            .contextMenu {
+                                Button("Edit") { formMode = .edit(entry) }
+                                Button("Duplicate") { duplicate(entry) }
+                                Divider()
+                                Button("Delete", role: .destructive) { requestDeleteGroup(group) }
+                            }
                         }
-                    } else {
-                        memberRow(group.members[0])
                     }
                 }
             }
-            .searchable(text: $search, prompt: "Search hosts")
             .navigationSplitViewColumnWidth(min: 220, ideal: 260)
         } detail: {
             detailContent
@@ -86,14 +105,6 @@ struct MainWindow: View {
                     Label("Settings", systemImage: "gearshape")
                 }
             }
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    formMode = .create
-                } label: {
-                    Label("New Host", systemImage: "plus")
-                }
-                .keyboardShortcut("n", modifiers: .command)
-            }
         }
         .sheet(item: $formMode) { mode in
             HostFormSheet(mode: mode)
@@ -113,14 +124,14 @@ struct MainWindow: View {
             Text(model.pendingError ?? "")
         }
         .confirmationDialog(
-            "Delete '\(deleteRequest?.host ?? "")'?",
+            "Delete '\(deleteRequest?.title ?? "")'?",
             isPresented: .init(
                 get: { deleteRequest != nil },
                 set: { if !$0 { deleteRequest = nil } }
             )
         ) {
             Button("Delete", role: .destructive) {
-                if let entry = deleteRequest { delete(entry) }
+                if let group = deleteRequest { deleteGroup(group) }
                 deleteRequest = nil
             }
             Button("Cancel", role: .cancel) { deleteRequest = nil }
@@ -219,42 +230,10 @@ struct MainWindow: View {
         }
     }
 
-    @ViewBuilder
-    private func groupLabel(_ group: HostGroupView) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(group.title).font(.headline)
-            Text("^[\(group.members.count) profile](inflect: true)")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-    }
-
-    @ViewBuilder
-    private func memberRow(_ member: ProfileRef) -> some View {
-        if let entry = model.entry(forAlias: member.alias, in: hosts) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(member.label).font(.headline)
-                    if member.isDefault {
-                        Text("default").font(.caption2)
-                            .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(.quaternary, in: Capsule())
-                    }
-                }
-                Text(member.user.map { "\($0)@\(entry.properties.first("HostName") ?? "—")" }
-                     ?? member.alias).font(.caption).foregroundStyle(.secondary)
-            }
-            .tag(entry.persistentModelID)
-            .contextMenu {
-                Button("Edit") { formMode = .edit(entry) }
-                Button("Duplicate") { duplicate(entry) }
-                Button("Add Profile…") { formMode = .edit(entry) }
-                if let group = entry.groupName {
-                    Button("Ungroup '\(group)'") { _ = model.ungroupOne(entry, allHosts: hosts) }
-                }
-                Divider()
-                Button("Delete", role: .destructive) { requestDelete(entry) }
-            }
-        }
+    /// The shared HostName shown under a group's title in the sidebar row.
+    private func hostSubtitle(_ group: HostGroupView) -> String {
+        guard let entry = model.entry(forAlias: group.defaultMember.alias, in: hosts) else { return "—" }
+        return entry.properties.first("HostName") ?? "—"
     }
 
     /// Laravel's DuplicateSshConfigAction: unique "-copy-N" suffix, then sync.
@@ -279,19 +258,24 @@ struct MainWindow: View {
     }
 
     /// Right-clicking a row that's part of a larger multi-selection confirms
-    /// deleting the whole selection at once; otherwise it confirms deleting
-    /// just the row that was clicked.
-    private func requestDelete(_ entry: HostEntry) {
-        if selection.count > 1, selection.contains(entry.persistentModelID) {
+    /// deleting the whole selection (every selected logical host) at once;
+    /// otherwise it confirms deleting just the group whose row was clicked.
+    private func requestDeleteGroup(_ group: HostGroupView) {
+        if selection.count > 1,
+           let entry = model.entry(forAlias: group.defaultMember.alias, in: hosts),
+           selection.contains(entry.persistentModelID) {
             multiDeleteRequest = selection
         } else {
-            deleteRequest = entry
+            deleteRequest = group
         }
     }
 
-    private func delete(_ entry: HostEntry) {
-        selection.remove(entry.persistentModelID)
-        context.delete(entry)
+    /// Deletes every member entry of a logical host (all aliases sharing its
+    /// group), not just the default profile.
+    private func deleteGroup(_ group: HostGroupView) {
+        let entries = group.members.compactMap { model.entry(forAlias: $0.alias, in: hosts) }
+        for entry in entries { selection.remove(entry.persistentModelID) }
+        for entry in entries { context.delete(entry) }
         do {
             try context.save()
             model.exportNow()
@@ -301,8 +285,13 @@ struct MainWindow: View {
         }
     }
 
+    /// Expands each selected id to its full logical host (group) before
+    /// deleting, so a selected default member takes its sibling profiles
+    /// with it.
     private func deleteMultiple(_ ids: Set<PersistentIdentifier>) {
-        let entries = hosts.filter { ids.contains($0.persistentModelID) }
+        let selected = hosts.filter { ids.contains($0.persistentModelID) }
+        let groupKeys = Set(selected.map { $0.groupName ?? $0.host })
+        let entries = hosts.filter { groupKeys.contains($0.groupName ?? $0.host) }
         for entry in entries { context.delete(entry) }
         selection = []
         do {
