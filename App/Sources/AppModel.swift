@@ -56,10 +56,10 @@ final class AppModel {
             return stored
         }
         // No explicit pick: prefer Zetty when installed, else the first detected.
-        if let zetty = installedTerminals.first(where: { $0.id == "dev.more.zetty" }) {
+        if let zetty = installedTerminals.first(where: { $0.id == "co.webteractive.zetty" }) {
             return zetty
         }
-        return selectableTerminals.first ?? TerminalRegistry.known[0]
+        return selectableTerminals.first ?? TerminalRegistry.systemDefault
     }
 
     var pendingError: String?

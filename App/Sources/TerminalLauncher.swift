@@ -15,13 +15,25 @@ struct TerminalLauncher {
         }
     }
 
+    /// A throwaway ssh:// URL used only to probe which installed apps register
+    /// the scheme — its host is irrelevant, nothing is ever opened with it.
+    private static let sshProbeURL = URL(string: "ssh://probe")!
+
+    /// The picker's contents, derived from what's installed: System Default,
+    /// then every app that registers the `ssh://` scheme (deduped by bundle id,
+    /// ordered by `TerminalRegistry`). No terminal is hardcoded — installing a
+    /// new ssh://-handling terminal makes it appear automatically.
     func detectInstalled() -> [Terminal] {
-        TerminalRegistry.known.filter { terminal in
-            switch terminal.launchPlan {
-            case .systemDefault: true
-            case .sshURL: appURL(for: terminal.id) != nil
-            }
+        var seen = Set<String>()
+        var discovered: [Terminal] = []
+        for url in NSWorkspace.shared.urlsForApplications(toOpen: Self.sshProbeURL) {
+            guard let id = Bundle(url: url)?.bundleIdentifier, seen.insert(id).inserted else { continue }
+            let fallback = FileManager.default.displayName(atPath: url.path)
+            discovered.append(Terminal(id: id,
+                                       name: TerminalRegistry.displayName(forBundleId: id, fallback: fallback),
+                                       launchPlan: .sshURL))
         }
+        return [TerminalRegistry.systemDefault] + TerminalRegistry.sortForDisplay(discovered)
     }
 
     /// Opens an already-built ssh:// URL with the chosen handler. Async open
@@ -43,7 +55,14 @@ struct TerminalLauncher {
         }
     }
 
+    /// Resolves the app to launch for a bundle id, preferring the copy in
+    /// `/Applications` when several are registered (dev builds in DerivedData
+    /// or build folders otherwise shadow the real install).
     private func appURL(for bundleId: String) -> URL? {
-        NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId)
+        let candidates = NSWorkspace.shared.urlsForApplications(toOpen: Self.sshProbeURL)
+            .filter { Bundle(url: $0)?.bundleIdentifier == bundleId }
+        return candidates.first { $0.path.hasPrefix("/Applications/") }
+            ?? candidates.first
+            ?? NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId)
     }
 }

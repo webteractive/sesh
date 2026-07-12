@@ -1,22 +1,34 @@
 import Testing
 @testable import SSHConfigCore
 
-@Test func knownTerminalsAreSshURLCapableWithSystemDefaultFirst() {
-    let ids = TerminalRegistry.known.map(\.id)
-    #expect(ids.first == TerminalRegistry.systemDefaultId)
-    #expect(Set(ids).count == ids.count)
-    #expect(ids == ["system-default", "com.apple.Terminal", "com.googlecode.iterm2", "dev.warp.Warp-Stable", "dev.more.zetty"])
-    // Zetty is back as an ssh:// handler; argv-only terminals stay out.
-    #expect(TerminalRegistry.terminal(withId: "dev.more.zetty")?.launchPlan == .sshURL)
-    #expect(!ids.contains("com.mitchellh.ghostty"))
+private func term(_ id: String, _ name: String) -> Terminal {
+    Terminal(id: id, name: name, launchPlan: .sshURL)
 }
 
-@Test func lookupByIdAndMiss() {
-    #expect(TerminalRegistry.terminal(withId: "com.apple.Terminal")?.name == "Terminal")
-    #expect(TerminalRegistry.terminal(withId: "nope") == nil)
+@Test func systemDefaultIsTheSyntheticEntry() {
+    #expect(TerminalRegistry.systemDefault.id == TerminalRegistry.systemDefaultId)
+    #expect(TerminalRegistry.systemDefault.launchPlan == .systemDefault)
 }
 
-@Test func launchPlansAreUrlBased() {
-    #expect(TerminalRegistry.terminal(withId: "system-default")?.launchPlan == .systemDefault)
-    #expect(TerminalRegistry.terminal(withId: "com.apple.Terminal")?.launchPlan == .sshURL)
+@Test func displayNameUsesOverrideThenFallback() {
+    // The zetty bundle's own name is lowercase; we prettify it.
+    #expect(TerminalRegistry.displayName(forBundleId: "co.webteractive.zetty", fallback: "zetty") == "Zetty")
+    // Unknown apps keep whatever LaunchServices reports.
+    #expect(TerminalRegistry.displayName(forBundleId: "com.example.newterm", fallback: "NewTerm") == "NewTerm")
+}
+
+@Test func sortPutsKnownTerminalsFirstThenAlphabetical() {
+    let sorted = TerminalRegistry.sortForDisplay([
+        term("com.example.zzz", "Zzz Term"),
+        term("co.webteractive.zetty", "Zetty"),
+        term("com.example.aaa", "Aaa Term"),
+        term("com.apple.Terminal", "Terminal"),
+    ])
+    // Known ones lead in preferredOrder; unknowns trail, alphabetical by name.
+    #expect(sorted.map(\.id) == [
+        "com.apple.Terminal",
+        "co.webteractive.zetty",
+        "com.example.aaa",
+        "com.example.zzz",
+    ])
 }
