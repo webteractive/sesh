@@ -201,13 +201,9 @@ struct MenuBarView: View {
                 .fixedSize()
                 .help("Choose a profile")
             } else if let defaultEntry {
-                Button {
+                CopyButton(help: "Copy \(defaultEntry.sshCommand)") {
                     model.copyCommand(defaultEntry)
-                } label: {
-                    Image(systemName: "doc.on.doc")
                 }
-                .buttonStyle(.borderless)
-                .help("Copy \(defaultEntry.sshCommand)")
             }
 
             if group.defaultMember.isConnectable, let defaultEntry {

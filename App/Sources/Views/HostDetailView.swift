@@ -112,14 +112,9 @@ struct HostDetailView: View {
                 .fixedSize()
             }
             if let memberEntry {
-                Button {
+                CopyButton(help: "Copy the ssh command") {
                     model.copyCommand(memberEntry)
-                } label: {
-                    Label("Copy", systemImage: "doc.on.doc")
                 }
-                .labelStyle(.iconOnly)
-                .buttonStyle(.plain)
-                .help("Copy the ssh command")
             }
             Button(role: .destructive) {
                 if let memberEntry {
