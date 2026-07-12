@@ -9,11 +9,12 @@ struct HostDetailView: View {
     var onEdit: (HostEntry) -> Void = { _ in }
     var onRemoveProfile: (HostEntry, [HostEntry]) -> Void = { _, _ in }
 
-    /// The entry's group (nil when it isn't part of one). Looked up fresh from
-    /// `hosts` each render so profile add/remove is reflected immediately.
+    /// The entry's group, whether it's a real multi-profile group or the
+    /// singleton bucket `HostGrouping` synthesizes for an ungrouped host.
+    /// Looked up fresh from `hosts` each render so profile add/remove is
+    /// reflected immediately.
     private var group: HostGroupView? {
-        guard entry.groupName != nil else { return nil }
-        return model.groups(from: hosts).first { $0.id == entry.groupName }
+        model.groups(from: hosts).first { $0.members.contains { $0.alias == entry.host } }
     }
 
     private var groupMembers: [HostEntry] {
@@ -26,91 +27,35 @@ struct HostDetailView: View {
             VStack(alignment: .leading, spacing: 16) {
                 Text(entry.displayName ?? entry.host).font(.largeTitle.bold())
 
-                if let group {
-                    GroupBox("Profiles") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            ForEach(group.members) { member in
-                                profileRow(member)
-                                if member.id != group.members.last?.id {
-                                    Divider()
-                                }
-                            }
-                        }
-                        .padding(4)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-
-                GroupBox("Connection") {
+                GroupBox {
                     Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 8) {
                         row("HostName", entry.properties.first("HostName"))
-                        row("User", entry.properties.first("User"))
-                        row("Port", entry.port)
-                        row("IdentityFile", entry.properties.first("IdentityFile"))
                     }
                     .padding(4)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                let extras = entry.properties.filter { !HostFormData.coreKeys.contains($0.key.lowercased()) }
-                if !extras.isEmpty {
-                    GroupBox("Other Options") {
-                        Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 8) {
-                            ForEach(extras, id: \.key) { prop in
-                                row(prop.key, prop.values.joined(separator: ", "))
+                Divider()
+
+                GroupBox("Credentials") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(group?.members ?? []) { member in
+                            profileRow(member)
+                            if member.id != group?.members.last?.id {
+                                Divider()
                             }
                         }
-                        .padding(4)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    .padding(4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                HStack(spacing: 12) {
-                    Button {
-                        model.copyCommand(entry)
-                    } label: {
-                        Label(entry.sshCommand, systemImage: "doc.on.doc").font(.body.monospaced())
-                    }
-                    .help("Copy the ssh command")
-
-                    Button {
-                        onEdit(entry)
-                    } label: {
-                        Label("Edit", systemImage: "pencil")
-                    }
-
-                    Button {
-                        onEdit(entry)
-                    } label: {
-                        Label("Add Profile…", systemImage: "plus.circle")
-                    }
-
-                    if entry.isConnectable {
-                        Menu {
-                            ForEach(model.selectableTerminals) { terminal in
-                                Button("Connect with \(terminal.name)") {
-                                    model.connect(entry, with: terminal)
-                                }
-                            }
-                        } label: {
-                            Label("Connect · \(model.preferredTerminal.name)", systemImage: "terminal")
-                        } primaryAction: {
-                            model.connect(entry)
-                        }
-                        .fixedSize()
-                        .keyboardShortcut(.return, modifiers: .command)
-                    }
+                Button {
+                    onEdit(entry)
+                } label: {
+                    Label("Edit", systemImage: "pencil")
                 }
 
-                if let raw = entry.rawBlock, !raw.isEmpty {
-                    GroupBox("Raw Block (as last imported)") {
-                        Text(raw)
-                            .font(.callout.monospaced())
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(4)
-                    }
-                }
                 Spacer()
             }
             .padding(20)
@@ -138,8 +83,7 @@ struct HostDetailView: View {
                             .background(.quaternary, in: Capsule())
                     }
                 }
-                Text(member.user.map { "\($0)@\(memberEntry?.properties.first("HostName") ?? "—")" }
-                     ?? member.alias).font(.caption).foregroundStyle(.secondary)
+                Text("Port \(memberEntry?.port ?? "22")").font(.caption).foregroundStyle(.secondary)
                 if let identity = member.identityFile, !identity.isEmpty {
                     Text(identity).font(.caption2).foregroundStyle(.tertiary)
                 }
@@ -158,6 +102,16 @@ struct HostDetailView: View {
                     model.connect(memberEntry)
                 }
                 .fixedSize()
+            }
+            if let memberEntry {
+                Button {
+                    model.copyCommand(memberEntry)
+                } label: {
+                    Label("Copy", systemImage: "doc.on.doc")
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.plain)
+                .help("Copy the ssh command")
             }
             Button(role: .destructive) {
                 if let memberEntry {
