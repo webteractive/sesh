@@ -7,3 +7,6 @@
 *.xcodeproj
 *.xcworkspace
 .swiftpm
+
+# Local process artifacts (brainstorming specs + implementation plans)
+docs/superpowers/
