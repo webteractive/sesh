@@ -3,9 +3,7 @@
 Native macOS menu-bar app for managing SSH connections. **The app is the source
 of truth**: you manage hosts in Sesh, and it exports them to an app-owned
 `~/.ssh/sesh.conf` that's linked into your `~/.ssh/config` via a single
-`Include` line. Your existing config is never rewritten. Originally a Swift port
-of [webteractive/sshconfig](https://github.com/webteractive/sshconfig)
-(Laravel + Filament); rebuilt with SwiftUI, SwiftData, and Tuist.
+`Include` line. Your existing config is never rewritten.
 
 ## Features
 
