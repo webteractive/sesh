@@ -28,11 +28,23 @@ final class AppModel {
 
     static let preferredTerminalKey = "preferredTerminalId"
     static let managedPathKey = "managedConfigPath"
+    static let lastSelectedAliasKey = "lastSelectedAlias"
 
     var preferredTerminalId: String {
         get { UserDefaults.standard.string(forKey: Self.preferredTerminalKey) ?? "" }
         set { UserDefaults.standard.set(newValue, forKey: Self.preferredTerminalKey) }
     }
+
+    /// Alias of the host last shown in the main window, so reopening the window
+    /// restores that selection instead of an empty detail pane.
+    var lastSelectedAlias: String {
+        get { UserDefaults.standard.string(forKey: Self.lastSelectedAliasKey) ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: Self.lastSelectedAliasKey) }
+    }
+
+    /// Set by the menu bar's Edit action to ask the main window to select this
+    /// host and open its edit form; the window consumes and clears it.
+    var pendingEditAlias: String?
 
     /// Path to the app-managed config fragment that's `Include`d from the
     /// user's real ssh config; defaults alongside it under `~/.ssh`.

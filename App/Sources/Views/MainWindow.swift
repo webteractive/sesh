@@ -65,68 +65,23 @@ struct MainWindow: View {
     var body: some View {
         @Bindable var model = model
         NavigationSplitView {
-            VStack(spacing: 0) {
-                HStack(spacing: 8) {
-                    TextField("Search hosts", text: $search)
-                        .textFieldStyle(.roundedBorder)
-                    Menu {
-                        Button("New Host") { formMode = .create }
-                        Button("New Workspace") { showNewWorkspace = true }
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
-                    .help("New Host or Workspace")
-                    Button {
-                        showSettings = true
-                    } label: {
-                        Image(systemName: "gearshape")
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Settings")
-                    Button(role: .destructive) {
-                        requestDeleteSelection()
-                    } label: {
-                        Image(systemName: "trash")
-                    }
-                    .buttonStyle(.borderless)
-                    .disabled(selection.isEmpty)
-                    .help("Delete selected host")
-                }
-                .padding(8)
-
-                List(selection: $selection) {
-                    if model.isWorkspaceMode {
-                        ForEach(workspaceSections) { section in
-                            Section {
-                                if expandedSections[section.id] ?? true {
-                                    ForEach(section.groups) { group in hostRow(group) }
-                                }
-                            } header: {
-                                workspaceHeader(section)
-                            }
-                        }
-                    } else {
-                        ForEach(sidebarGroups) { group in hostRow(group) }
-                    }
-                }
-                .onDeleteCommand { requestDeleteSelection() }
-            }
-            .navigationSplitViewColumnWidth(min: 220, ideal: 260)
+            sidebar
         } detail: {
             detailContent
         }
         .navigationTitle("Sesh")
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    importNow()
-                } label: {
-                    Label("Import", systemImage: "square.and.arrow.down")
-                }
-                .help("Import hosts from ~/.ssh/config that aren't already in Sesh")
+        .onAppear {
+            consumePendingEdit()
+            restoreLastSelection()
+        }
+        .onChange(of: model.pendingEditAlias) { _, _ in consumePendingEdit() }
+        .onChange(of: selection) { _, sel in
+            if sel.count == 1, let id = sel.first,
+               let entry = hosts.first(where: { $0.persistentModelID == id }) {
+                model.lastSelectedAlias = entry.host
             }
+        }
+        .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     openWindow(id: "raw-config")
@@ -266,6 +221,58 @@ struct MainWindow: View {
         }
     }
 
+    private var sidebar: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                TextField("Search hosts", text: $search)
+                    .textFieldStyle(.roundedBorder)
+                Menu {
+                    Button("New Host") { formMode = .create }
+                    Button("New Workspace") { showNewWorkspace = true }
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("New Host or Workspace")
+                Button {
+                    showSettings = true
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .buttonStyle(.borderless)
+                .help("Settings")
+                Button(role: .destructive) {
+                    requestDeleteSelection()
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .disabled(selection.isEmpty)
+                .help("Delete selected host")
+            }
+            .padding(8)
+
+            List(selection: $selection) {
+                if model.isWorkspaceMode {
+                    ForEach(workspaceSections) { section in
+                        Section {
+                            if expandedSections[section.id] ?? true {
+                                ForEach(section.groups) { group in hostRow(group) }
+                            }
+                        } header: {
+                            workspaceHeader(section)
+                        }
+                    }
+                } else {
+                    ForEach(sidebarGroups) { group in hostRow(group) }
+                }
+            }
+            .onDeleteCommand { requestDeleteSelection() }
+        }
+        .navigationSplitViewColumnWidth(min: 220, ideal: 260)
+    }
+
     @ViewBuilder
     private var detailContent: some View {
         if selection.count == 1, let id = selection.first,
@@ -297,6 +304,25 @@ struct MainWindow: View {
                                    systemImage: "server.rack",
                                    description: Text("Select a single host to view its details."))
         }
+    }
+
+    /// Restores the last-viewed host when the window opens with nothing yet
+    /// selected, so reopening lands on where you left off.
+    private func restoreLastSelection() {
+        guard selection.isEmpty, !model.lastSelectedAlias.isEmpty,
+              let entry = hosts.first(where: { $0.host == model.lastSelectedAlias }) else { return }
+        selection = [entry.persistentModelID]
+    }
+
+    /// Handles a menu-bar Edit request: clears any search filter, selects the
+    /// target host, opens its edit form, then clears the signal.
+    private func consumePendingEdit() {
+        guard let alias = model.pendingEditAlias,
+              let entry = hosts.first(where: { $0.host == alias }) else { return }
+        search = ""
+        selection = [entry.persistentModelID]
+        formMode = .edit(entry)
+        model.pendingEditAlias = nil
     }
 
     /// The shared HostName shown under a group's title in the sidebar row.

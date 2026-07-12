@@ -206,6 +206,16 @@ struct MenuBarView: View {
                 }
             }
 
+            if let defaultEntry {
+                Button {
+                    editInWindow(defaultEntry)
+                } label: {
+                    Image(systemName: "pencil")
+                }
+                .buttonStyle(.borderless)
+                .help("Edit in Sesh")
+            }
+
             if group.defaultMember.isConnectable, let defaultEntry {
                 Button {
                     model.connect(defaultEntry)
@@ -239,6 +249,13 @@ struct MenuBarView: View {
         openWindow(id: "main")
         NSApp.activate(ignoringOtherApps: true)
         dismiss()   // close the menu bar panel once the window is up
+    }
+
+    /// Opens the main window and asks it (via AppModel) to select this host and
+    /// open its edit form.
+    private func editInWindow(_ entry: HostEntry) {
+        model.pendingEditAlias = entry.host
+        openMainWindow()
     }
 
     private func subtitle(_ entry: HostEntry) -> String {
