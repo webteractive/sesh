@@ -78,6 +78,13 @@ struct MainWindow: View {
                     .menuStyle(.borderlessButton)
                     .fixedSize()
                     .help("New Host or Workspace")
+                    Button {
+                        showSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Settings")
                 }
                 .padding(8)
 
@@ -103,7 +110,7 @@ struct MainWindow: View {
         }
         .navigationTitle("Sesh")
         .toolbar {
-            ToolbarItem(placement: .secondaryAction) {
+            ToolbarItem(placement: .primaryAction) {
                 Button {
                     importNow()
                 } label: {
@@ -111,19 +118,13 @@ struct MainWindow: View {
                 }
                 .help("Import hosts from ~/.ssh/config that aren't already in Sesh")
             }
-            ToolbarItem(placement: .secondaryAction) {
+            ToolbarItem(placement: .primaryAction) {
                 Button {
                     openWindow(id: "raw-config")
                 } label: {
                     Label("Raw Config", systemImage: "doc.plaintext")
                 }
-            }
-            ToolbarItem(placement: .secondaryAction) {
-                Button {
-                    showSettings = true
-                } label: {
-                    Label("Settings", systemImage: "gearshape")
-                }
+                .help("View the managed ~/.ssh/sesh.conf")
             }
         }
         .sheet(item: $formMode) { mode in
