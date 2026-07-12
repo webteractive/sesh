@@ -5,9 +5,9 @@ import Testing
     let ids = TerminalRegistry.known.map(\.id)
     #expect(ids.first == TerminalRegistry.systemDefaultId)
     #expect(Set(ids).count == ids.count)
-    #expect(ids == ["system-default", "com.apple.Terminal", "com.googlecode.iterm2", "dev.warp.Warp-Stable"])
-    // no argv terminals remain
-    #expect(!ids.contains("dev.more.zetty"))
+    #expect(ids == ["system-default", "com.apple.Terminal", "com.googlecode.iterm2", "dev.warp.Warp-Stable", "dev.more.zetty"])
+    // Zetty is back as an ssh:// handler; argv-only terminals stay out.
+    #expect(TerminalRegistry.terminal(withId: "dev.more.zetty")?.launchPlan == .sshURL)
     #expect(!ids.contains("com.mitchellh.ghostty"))
 }
 

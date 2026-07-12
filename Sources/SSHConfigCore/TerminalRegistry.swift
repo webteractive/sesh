@@ -24,6 +24,7 @@ public enum TerminalRegistry {
         Terminal(id: "com.apple.Terminal", name: "Terminal", launchPlan: .sshURL),
         Terminal(id: "com.googlecode.iterm2", name: "iTerm2", launchPlan: .sshURL),
         Terminal(id: "dev.warp.Warp-Stable", name: "Warp", launchPlan: .sshURL),
+        Terminal(id: "dev.more.zetty", name: "Zetty", launchPlan: .sshURL),
     ]
 
     public static func terminal(withId id: String) -> Terminal? { known.first { $0.id == id } }

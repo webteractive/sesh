@@ -55,6 +55,10 @@ final class AppModel {
            stored.id != TerminalRegistry.systemDefaultId {
             return stored
         }
+        // No explicit pick: prefer Zetty when installed, else the first detected.
+        if let zetty = installedTerminals.first(where: { $0.id == "dev.more.zetty" }) {
+            return zetty
+        }
         return selectableTerminals.first ?? TerminalRegistry.known[0]
     }
 
