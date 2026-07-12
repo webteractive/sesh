@@ -18,3 +18,10 @@ import SwiftData
     ctx.insert(e); try ctx.save()
     #expect(try ctx.fetch(FetchDescriptor<HostEntry>())[0].displayName == nil)
 }
+
+@MainActor @Test func workspaceIDDefaultsNil() throws {
+    let ctx = try makeContext()
+    let e = HostEntry(host: "web", properties: [], rawBlock: nil)
+    ctx.insert(e); try ctx.save()
+    #expect(try ctx.fetch(FetchDescriptor<HostEntry>())[0].workspaceID == nil)
+}

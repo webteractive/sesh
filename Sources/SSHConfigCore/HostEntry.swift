@@ -16,6 +16,8 @@ public final class HostEntry {
     /// Human label from the New Host form; shown in the UI, never written to
     /// the ssh config. Nil for entries created before this field / by import.
     public var displayName: String? = nil
+    /// App-only workspace membership (nil = Default). Never written to ssh config.
+    public var workspaceID: UUID? = nil
 
     public init(host: String, properties: [SSHProperty], rawBlock: String?) {
         self.host = host
