@@ -46,6 +46,10 @@ final class AppModel {
     /// host and open its edit form; the window consumes and clears it.
     var pendingEditAlias: String?
 
+    /// Set by the menu bar's Settings button to ask the main window to open the
+    /// Settings sheet once it's up; the window consumes and clears it.
+    var pendingShowSettings = false
+
     /// Path to the app-managed config fragment that's `Include`d from the
     /// user's real ssh config; defaults alongside it under `~/.ssh`.
     var managedPath: String {

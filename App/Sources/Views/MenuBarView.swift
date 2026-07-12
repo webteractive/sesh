@@ -234,13 +234,31 @@ struct MenuBarView: View {
 
     private var footer: some View {
         HStack {
-            Button("Open Sesh") { openMainWindow() }
+            Button { openMainWindow() } label: {
+                Image(systemName: "macwindow")
+            }
+            .help("Open Sesh")
             Spacer()
-            Button("Quit") { NSApp.terminate(nil) }
+            Button { openSettings() } label: {
+                Image(systemName: "gearshape")
+            }
+            .help("Settings")
+            Spacer()
+            Button { NSApp.terminate(nil) } label: {
+                Image(systemName: "power")
+            }
+            .help("Quit Sesh")
         }
         .buttonStyle(.borderless)
-        .controlSize(.small)
-        .padding(10)
+        .imageScale(.large)
+        .padding(.horizontal, 24)
+        .padding(.vertical, 10)
+    }
+
+    /// Opens the main window and asks it (via AppModel) to show Settings.
+    private func openSettings() {
+        model.pendingShowSettings = true
+        openMainWindow()
     }
 
     private func openMainWindow() {

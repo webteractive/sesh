@@ -73,9 +73,11 @@ struct MainWindow: View {
         .navigationTitle("Sesh")
         .onAppear {
             consumePendingEdit()
+            consumePendingSettings()
             restoreLastSelection()
         }
         .onChange(of: model.pendingEditAlias) { _, _ in consumePendingEdit() }
+        .onChange(of: model.pendingShowSettings) { _, _ in consumePendingSettings() }
         .onChange(of: selection) { _, sel in
             if sel.count == 1, let id = sel.first,
                let entry = hosts.first(where: { $0.persistentModelID == id }) {
@@ -350,6 +352,13 @@ struct MainWindow: View {
         selection = [entry.persistentModelID]
         formMode = .edit(entry)
         model.pendingEditAlias = nil
+    }
+
+    /// Opens the Settings sheet when the menu bar requested it.
+    private func consumePendingSettings() {
+        guard model.pendingShowSettings else { return }
+        showSettings = true
+        model.pendingShowSettings = false
     }
 
     /// The shared HostName shown under a group's title in the sidebar row.
