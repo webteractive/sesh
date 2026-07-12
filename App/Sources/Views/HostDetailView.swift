@@ -8,6 +8,7 @@ struct HostDetailView: View {
     let entry: HostEntry
     var onEdit: (HostEntry) -> Void = { _ in }
     var onRemoveProfile: (HostEntry, [HostEntry]) -> Void = { _, _ in }
+    var onDelete: (HostEntry) -> Void = { _ in }
 
     /// The entry's group, whether it's a real multi-profile group or the
     /// singleton bucket `HostGrouping` synthesizes for an ungrouped host.
@@ -50,10 +51,17 @@ struct HostDetailView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                Button {
-                    onEdit(entry)
-                } label: {
-                    Label("Edit", systemImage: "pencil")
+                HStack {
+                    Button {
+                        onEdit(entry)
+                    } label: {
+                        Label("Edit", systemImage: "pencil")
+                    }
+                    Button(role: .destructive) {
+                        onDelete(entry)
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
                 }
 
                 Spacer()

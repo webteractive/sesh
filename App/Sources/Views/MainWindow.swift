@@ -85,6 +85,14 @@ struct MainWindow: View {
                     }
                     .buttonStyle(.borderless)
                     .help("Settings")
+                    Button(role: .destructive) {
+                        requestDeleteSelection()
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(selection.isEmpty)
+                    .help("Delete selected host")
                 }
                 .padding(8)
 
@@ -103,6 +111,7 @@ struct MainWindow: View {
                         ForEach(sidebarGroups) { group in hostRow(group) }
                     }
                 }
+                .onDeleteCommand { requestDeleteSelection() }
             }
             .navigationSplitViewColumnWidth(min: 220, ideal: 260)
         } detail: {
@@ -265,7 +274,8 @@ struct MainWindow: View {
                            onEdit: { formMode = .edit($0) },
                            onRemoveProfile: { profileEntry, members in
                                removeProfileRequest = (entry: profileEntry, members: members)
-                           })
+                           },
+                           onDelete: { requestDeleteHost($0) })
         } else if hosts.isEmpty {
             ContentUnavailableView {
                 Label("No Hosts Yet", systemImage: "server.rack")
@@ -377,6 +387,19 @@ struct MainWindow: View {
                         }
                     }
                 }
+                // Always-visible delete affordance (overlay so it doesn't
+                // trigger the row's tap-to-collapse).
+                .overlay(alignment: .trailing) {
+                    Button(role: .destructive) {
+                        if let ws = model.workspaces.first(where: { $0.id == ref.id }) {
+                            deleteWorkspaceTarget = ws
+                        }
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Delete workspace")
+                }
         } else {
             base   // Default header: pinned first, no reorder menu.
         }
@@ -413,6 +436,28 @@ struct MainWindow: View {
            selection.contains(entry.persistentModelID) {
             multiDeleteRequest = selection
         } else {
+            deleteRequest = group
+        }
+    }
+
+    /// The logical-host group a given alias belongs to.
+    private func group(forAlias alias: String) -> HostGroupView? {
+        model.groups(from: hosts).first { $0.members.contains { $0.alias == alias } }
+    }
+
+    /// Confirm-delete the single host shown in the detail pane.
+    private func requestDeleteHost(_ entry: HostEntry) {
+        if let group = group(forAlias: entry.host) { deleteRequest = group }
+    }
+
+    /// Confirm-delete the current sidebar selection (header trash button + ⌫ key).
+    private func requestDeleteSelection() {
+        guard !selection.isEmpty else { return }
+        if selection.count > 1 {
+            multiDeleteRequest = selection
+        } else if let id = selection.first,
+                  let entry = hosts.first(where: { $0.persistentModelID == id }),
+                  let group = group(forAlias: entry.host) {
             deleteRequest = group
         }
     }
