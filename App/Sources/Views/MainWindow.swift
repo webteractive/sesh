@@ -84,8 +84,10 @@ struct MainWindow: View {
                 List(selection: $selection) {
                     if model.isWorkspaceMode {
                         ForEach(workspaceSections) { section in
-                            Section(isExpanded: sectionExpanded(section.id)) {
-                                ForEach(section.groups) { group in hostRow(group) }
+                            Section {
+                                if expandedSections[section.id] ?? true {
+                                    ForEach(section.groups) { group in hostRow(group) }
+                                }
                             } header: {
                                 workspaceHeader(section)
                             }
@@ -333,33 +335,34 @@ struct MainWindow: View {
     /// Rename…/Delete context menu for a real workspace.
     @ViewBuilder
     private func workspaceHeader(_ section: WorkspaceSection) -> some View {
-        if let ref = section.workspace {
+        let expanded = expandedSections[section.id] ?? true
+        HStack(spacing: 4) {
+            Image(systemName: "chevron.right")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .rotationEffect(.degrees(expanded ? 90 : 0))
             Text(section.title)
-                .contextMenu {
-                    Button("Rename…") {
-                        if let ws = model.workspaces.first(where: { $0.id == ref.id }) {
-                            renameWorkspaceTarget = ws
-                        }
-                    }
-                    Button("Delete", role: .destructive) {
-                        if let ws = model.workspaces.first(where: { $0.id == ref.id }) {
-                            deleteWorkspaceTarget = ws
-                        }
+            Spacer(minLength: 0)
+        }
+        // Clicking anywhere on the header row toggles the section's collapse.
+        .contentShape(Rectangle())
+        .onTapGesture { expandedSections[section.id] = !expanded }
+        .contextMenu {
+            if let ref = section.workspace {
+                Button("Rename…") {
+                    if let ws = model.workspaces.first(where: { $0.id == ref.id }) {
+                        renameWorkspaceTarget = ws
                     }
                 }
-        } else {
-            Text(section.title)
+                Button("Delete", role: .destructive) {
+                    if let ws = model.workspaces.first(where: { $0.id == ref.id }) {
+                        deleteWorkspaceTarget = ws
+                    }
+                }
+            }
         }
     }
 
-    /// Per-section collapse state for the sidebar's collapsible `Section`s,
-    /// keyed by `WorkspaceSection.id` (defaults to expanded).
-    private func sectionExpanded(_ id: String) -> Binding<Bool> {
-        Binding(
-            get: { expandedSections[id] ?? true },
-            set: { expandedSections[id] = $0 }
-        )
-    }
 
     /// Laravel's DuplicateSshConfigAction: unique "-copy-N" suffix, then sync.
     private func duplicate(_ entry: HostEntry) {
