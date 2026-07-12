@@ -24,6 +24,7 @@ struct MainWindow: View {
     @State private var renameWorkspaceTarget: Workspace?
     @State private var deleteWorkspaceTarget: Workspace?
     @State private var expandedSections: [String: Bool] = [:]
+    @FocusState private var searchFocused: Bool
 
     private var filtered: [HostEntry] {
         guard !search.isEmpty else { return hosts }
@@ -211,14 +212,39 @@ struct MainWindow: View {
                 )
             }
         }
-        .background {
+        .background { shortcuts }
+    }
+
+    /// Hidden buttons that back the window's global keyboard shortcuts. Actions
+    /// on the selected host no-op when nothing (or more than one) is selected.
+    private var shortcuts: some View {
+        Group {
             Button("") { showPalette.toggle() }
                 .keyboardShortcut("k", modifiers: .command)
-                .hidden()
             Button("") { formMode = .create }
                 .keyboardShortcut("n", modifiers: .command)
-                .hidden()
+            Button("") { showNewWorkspace = true }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+            Button("") { showSettings = true }
+                .keyboardShortcut(",", modifiers: .command)
+            Button("") { searchFocused = true }
+                .keyboardShortcut("f", modifiers: .command)
+            Button("") { if let e = selectedEntry { formMode = .edit(e) } }
+                .keyboardShortcut("e", modifiers: .command)
+            Button("") { if let e = selectedEntry, e.isConnectable { model.connect(e) } }
+                .keyboardShortcut(.return, modifiers: .command)
+            Button("") { if let e = selectedEntry { model.copyCommand(e) } }
+                .keyboardShortcut("c", modifiers: [.command, .shift])
+            Button("") { if let e = selectedEntry { duplicate(e) } }
+                .keyboardShortcut("d", modifiers: .command)
         }
+        .hidden()
+    }
+
+    /// The single selected host, or nil when the selection is empty or multiple.
+    private var selectedEntry: HostEntry? {
+        guard selection.count == 1, let id = selection.first else { return nil }
+        return hosts.first(where: { $0.persistentModelID == id })
     }
 
     private var sidebar: some View {
@@ -226,6 +252,7 @@ struct MainWindow: View {
             HStack(spacing: 8) {
                 TextField("Search hosts", text: $search)
                     .textFieldStyle(.roundedBorder)
+                    .focused($searchFocused)
                 Menu {
                     Button("New Host") { formMode = .create }
                     Button("New Workspace") { showNewWorkspace = true }

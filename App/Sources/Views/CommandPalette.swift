@@ -165,8 +165,18 @@ struct CommandPalette: View {
                     Text(row.subtitle).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text(row.isConnectable ? "↩ connect · ⌘↩ copy" : "↩ reveal")
-                    .font(.caption2).foregroundStyle(.tertiary)
+                if row.isConnectable {
+                    Button { activate(row.alias, .connect) } label: {
+                        Image(systemName: "terminal")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Connect")
+                }
+                Button { activate(row.alias, .copy) } label: {
+                    Image(systemName: "doc.on.doc")
+                }
+                .buttonStyle(.borderless)
+                .help("Copy ssh command")
             case .action(let action):
                 Image(systemName: action.icon).frame(width: 20)
                 Text(action.title)
@@ -176,6 +186,14 @@ struct CommandPalette: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
         .background(selected ? Color.accentColor.opacity(0.2) : .clear)
+    }
+
+    /// Runs a host action from a row's Connect/Copy button, dismissing first so
+    /// a stray Return can't re-fire it.
+    private func activate(_ alias: String, _ action: PaletteHostAction) {
+        guard isPresented, let entry = resolve(alias) else { return }
+        isPresented = false
+        onHost(entry, action)
     }
 
     private func execute(at index: Int, commandModifier: Bool) {
