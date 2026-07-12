@@ -71,41 +71,9 @@ Each release ships a `Sesh-<version>.dmg.sha256` sidecar:
 shasum -a 256 Sesh-<version>.dmg   # compare against the .sha256 file
 ```
 
-## Build from source
+## Requirements
 
-Requirements: macOS 15.0+, Xcode 16+, and [Tuist](https://tuist.dev).
-
-```bash
-tuist generate --no-open
-tuist build Sesh
-```
-
-### Test
-
-```bash
-swift test
-```
-
-### Package a release
-
-`scripts/package.sh` builds Release and produces `dist/Sesh-<version>.dmg` plus a
-`.sha256` sidecar (version is read from the built app's Info.plist):
-
-```bash
-scripts/package.sh
-```
-
-Then attach both files to a GitHub release, e.g.:
-
-```bash
-gh release create v<version> dist/Sesh-<version>.dmg dist/Sesh-<version>.dmg.sha256 \
-  --title "Sesh <version>" --generate-notes
-```
-
-## Layout
-
-Core logic (parser, writer, exporter, include manager, importer, backups) lives
-in the `SSHConfigCore` package under `Sources/`; the SwiftUI app is under `App/`.
+macOS 15.0 or later.
 
 ## License
 
