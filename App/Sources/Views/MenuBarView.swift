@@ -19,6 +19,7 @@ struct MenuBarView: View {
     private static let recentLimit = 10
     private static let rowHeight: CGFloat = 44
     private static let sectionHeaderHeight: CGFloat = 22
+    private static let workspaceRowHeight: CGFloat = 32
 
     /// Empty query → the 10 most-recently-updated hosts (quick access).
     /// A query → fuzzy search across all hosts.
@@ -42,7 +43,11 @@ struct MenuBarView: View {
     /// recent-10 quick-access list untouched — there's no search match to
     /// widen around.
     private var searchWidenedHosts: [HostEntry] {
-        guard !query.isEmpty else { return filtered }
+        guard !query.isEmpty else {
+            // Browsing workspaces lists *every* host under its workspace — the
+            // recent-10 cap only makes sense for the flat quick-access list.
+            return model.isWorkspaceMode ? hosts : filtered
+        }
         let matched = filtered
         let matchedGroups = Set(matched.compactMap(\.groupName))
         return hosts.filter { h in
@@ -68,10 +73,21 @@ struct MenuBarView: View {
         sections.filter { !$0.groups.isEmpty }
     }
 
+    /// Workspace browsing: with workspaces defined and nothing typed, the panel
+    /// lists workspaces as rows whose submenus hold their hosts. Typing swaps
+    /// back to searchable host rows — a submenu you can't type into is no way
+    /// to run a search.
+    private var isBrowsingWorkspaces: Bool {
+        model.isWorkspaceMode && query.isEmpty
+    }
+
     /// The single flat top-to-bottom ordering used for keyboard selection and
-    /// Return-to-activate, regardless of whether rows are shown sectioned or flat.
+    /// Return-to-activate, regardless of whether rows are shown sectioned or
+    /// flat. Empty while browsing workspaces — those rows open menus rather
+    /// than connecting, so there's nothing for Return to activate.
     private var displayGroups: [HostGroupView] {
-        model.isWorkspaceMode ? nonEmptySections.flatMap(\.groups) : groups
+        if isBrowsingWorkspaces { return [] }
+        return model.isWorkspaceMode ? nonEmptySections.flatMap(\.groups) : groups
     }
 
     var body: some View {
@@ -108,6 +124,16 @@ struct MenuBarView: View {
                 Text("No matches")
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 16)
+            } else if isBrowsingWorkspaces {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(nonEmptySections) { section in
+                            workspaceRow(section)
+                        }
+                    }
+                }
+                // See the flat-mode note below on why a definite height is required.
+                .frame(height: CGFloat(min(nonEmptySections.count, 8)) * Self.workspaceRowHeight)
             } else if model.isWorkspaceMode {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
@@ -186,6 +212,63 @@ struct MenuBarView: View {
             model.connect(entry)
         } else {
             model.copyCommand(entry)
+        }
+    }
+
+    /// A workspace row: the workspace name and its host count, opening a
+    /// submenu of its hosts. Workspaces come in sidebar order (Default first),
+    /// hosts within one in the same most-recently-updated order the sidebar uses.
+    private func workspaceRow(_ section: WorkspaceSection) -> some View {
+        Menu {
+            ForEach(section.groups) { group in
+                hostMenu(group)
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(section.title)
+                Spacer(minLength: 0)
+                Text("\(section.groups.count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .padding(.horizontal, 10)
+        .frame(height: Self.workspaceRowHeight)
+    }
+
+    /// One host inside a workspace submenu. A multi-profile host nests a menu
+    /// per profile; a single-profile host offers its actions directly.
+    @ViewBuilder
+    private func hostMenu(_ group: HostGroupView) -> some View {
+        let defaultEntry = model.entry(forAlias: group.defaultMember.alias, in: hosts)
+        Menu(group.title) {
+            if group.isMultiProfile {
+                ForEach(group.members) { member in
+                    if let memberEntry = model.entry(forAlias: member.alias, in: hosts) {
+                        Menu(member.label) {
+                            if member.isConnectable {
+                                Button("Connect") { model.connect(memberEntry) }
+                            }
+                            Button("Copy Command") { model.copyCommand(memberEntry) }
+                        }
+                    }
+                }
+            } else if let defaultEntry {
+                if group.defaultMember.isConnectable {
+                    Button("Connect") { model.connect(defaultEntry) }
+                }
+                Button("Copy Command") { model.copyCommand(defaultEntry) }
+            }
+            if let defaultEntry {
+                Divider()
+                Button("Edit in Sesh…") { editInWindow(defaultEntry) }
+            }
         }
     }
 

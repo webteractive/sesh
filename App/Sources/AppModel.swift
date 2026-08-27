@@ -419,6 +419,13 @@ final class AppModel {
         return reorderWorkspaces(order)
     }
 
+    /// Drag-and-drop reorder: drops the workspace `moved` onto `target`'s slot.
+    /// Returns an error message, or nil on success (including no-op drops).
+    func reorderWorkspace(_ moved: UUID, onto target: UUID) -> String? {
+        let order = WorkspaceOrdering.reorder(workspaces.map(\.id), moving: moved, onto: target)
+        return reorderWorkspaces(order)
+    }
+
     /// Reorder workspaces to match `orderedIDs`. Assigns each a fresh
     /// `sortOrder` = its index. App-only; no export.
     func reorderWorkspaces(_ orderedIDs: [UUID]) -> String? {

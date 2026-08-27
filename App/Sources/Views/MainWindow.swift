@@ -24,6 +24,8 @@ struct MainWindow: View {
     @State private var renameWorkspaceTarget: Workspace?
     @State private var deleteWorkspaceTarget: Workspace?
     @State private var expandedSections: [String: Bool] = [:]
+    /// Workspace header currently under a drag, for the drop highlight.
+    @State private var dropTarget: UUID?
     @FocusState private var searchFocused: Bool
 
     private var filtered: [HostEntry] {
@@ -462,9 +464,39 @@ struct MainWindow: View {
                     .buttonStyle(.borderless)
                     .help("Delete workspace")
                 }
+                .draggable(ref.id.uuidString)
+                .dropDestination(for: String.self) { items, _ in
+                    drop(items, onto: ref.id)
+                } isTargeted: { targeted in
+                    dropTarget = targeted ? ref.id : nil
+                }
+                .background(dropTarget == ref.id ? Color.accentColor.opacity(0.25) : .clear)
         } else {
-            base   // Default header: pinned first, no reorder menu.
+            // Default header: pinned first, never dragged — but it accepts a
+            // drop as the "move to the top" landing spot.
+            base
+                .dropDestination(for: String.self) { items, _ in
+                    guard let first = model.workspaces.first else { return false }
+                    return drop(items, onto: first.id)
+                } isTargeted: { targeted in
+                    dropTarget = targeted ? defaultDropID : nil
+                }
+                .background(dropTarget == defaultDropID ? Color.accentColor.opacity(0.25) : .clear)
         }
+    }
+
+    /// Stand-in id for the Default header, which has no workspace of its own.
+    private var defaultDropID: UUID { UUID(uuidString: "00000000-0000-0000-0000-000000000000")! }
+
+    /// Applies a workspace-header drop. Ignores payloads that aren't one of our
+    /// workspace ids, so text dragged in from elsewhere can't reorder anything.
+    private func drop(_ items: [String], onto target: UUID) -> Bool {
+        guard let raw = items.first, let moved = UUID(uuidString: raw),
+              model.workspaces.contains(where: { $0.id == moved }) else { return false }
+        if let message = model.reorderWorkspace(moved, onto: target) {
+            model.pendingError = message
+        }
+        return true
     }
 
 
