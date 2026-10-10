@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="#0D1512"/>
+  <!-- scaled about the tile's centre so the key keeps equal air left and right -->
+  <g transform="translate(512 512) scale(0.8) translate(-512 -512)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <!-- key: a square head that doubles as a terminal window, then the blade -->
+    <rect x="224" y="370" width="284" height="284" rx="64" stroke="#F1F5F0" stroke-width="56"/>
+    <path d="M 508 512 H 800 V 600 M 704 512 V 600" stroke="#F1F5F0" stroke-width="56"/>
+    <!-- >_ shell prompt -->
+    <polyline points="292,468 336,512 292,556" stroke="#3DDC97" stroke-width="38"/>
+    <path d="M 366 556 H 438" stroke="#3DDC97" stroke-width="38"/>
+  </g>
+</svg>

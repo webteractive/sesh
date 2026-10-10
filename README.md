@@ -47,7 +47,7 @@ of truth**: you manage hosts in Sesh, and it exports them to an app-owned
 2. Open the DMG and drag **Sesh** into **Applications**.
 3. Launch Sesh from Applications or Spotlight.
 
-Sesh lives in the menu bar (look for the terminal glyph). Click it to search and
+Sesh lives in the menu bar (look for the key glyph). Click it to search and
 connect; open the main window from there to manage hosts.
 
 ### Verify the download (optional)

@@ -26,7 +26,7 @@ struct SSHConfigApp: App {
         .defaultSize(width: 560, height: 480)
         .defaultLaunchBehavior(.suppressed)
 
-        MenuBarExtra("Sesh", systemImage: "terminal") {
+        MenuBarExtra("Sesh", image: "MenuBarIcon") {
             MenuBarView()
                 .environment(model)
                 .modelContainer(AppModel.container)
