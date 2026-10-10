@@ -45,20 +45,7 @@ of truth**: you manage hosts in Sesh, and it exports them to an app-owned
 1. Open the [Releases](https://github.com/webteractive/sesh/releases) page and
    download the latest `Sesh-<version>.dmg`.
 2. Open the DMG and drag **Sesh** into **Applications**.
-3. Clear the Gatekeeper quarantine flag (see below), then launch Sesh from
-   Applications or Spotlight:
-
-   ```sh
-   xattr -d com.apple.quarantine /Applications/Sesh.app
-   ```
-
-> **Why step 3?** Builds are not yet signed or notarized by Apple, so macOS
-> quarantines the downloaded app and shows *"Sesh is damaged and can't be
-> opened."* It isn't damaged — that's Gatekeeper's message for any unsigned
-> download. The command above clears the flag on that copy; you won't see the
-> dialog again until you install an **update**, where the freshly downloaded DMG
-> repeats step 3. Developer ID signing + notarization is planned, which removes
-> this step entirely.
+3. Launch Sesh from Applications or Spotlight.
 
 Sesh lives in the menu bar (look for the terminal glyph). Click it to search and
 connect; open the main window from there to manage hosts.
