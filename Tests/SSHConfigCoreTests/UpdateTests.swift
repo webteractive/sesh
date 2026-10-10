@@ -47,6 +47,6 @@ import Foundation
         workDir: "/tmp/work")
     #expect(script.contains("kill -0 4242"))
     #expect(script.contains("ditto '/tmp/work/Sesh.app' '/Applications/Sesh.app'"))
-    #expect(script.contains("xattr -dr com.apple.quarantine '/Applications/Sesh.app'"))
+    #expect(!script.contains("xattr"))
     #expect(script.contains("open '/Applications/Sesh.app'"))
 }

@@ -13,11 +13,10 @@ public enum SelfUpdateScript {
         return """
         #!/bin/sh
         # Sesh self-update helper (generated). Waits for the app to quit, swaps
-        # the bundle in place, strips quarantine, relaunches, and self-deletes.
+        # the bundle in place, relaunches, and self-deletes.
         while kill -0 \(pid) 2>/dev/null; do sleep 0.2; done
         rm -rf \(q(targetAppPath))
         ditto \(q(stagedAppPath)) \(q(targetAppPath))
-        xattr -dr com.apple.quarantine \(q(targetAppPath)) 2>/dev/null || true
         rm -rf \(q(workDir))
         open \(q(targetAppPath))
         rm -- "$0"
