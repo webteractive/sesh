@@ -12,7 +12,7 @@ final class AppModel {
             let dir = URL.applicationSupportDirectory.appending(path: "Sesh", directoryHint: .isDirectory)
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             let config = ModelConfiguration(url: dir.appending(path: "Sesh.store"))
-            return try ModelContainer(for: HostEntry.self, Workspace.self, configurations: config)
+            return try ModelContainer(for: HostEntry.self, Workspace.self, HostsFileEntry.self, configurations: config)
         } catch {
             fatalError("Failed to create SwiftData container: \(error)")
         }
@@ -155,6 +155,29 @@ final class AppModel {
         }
         return selectableTerminals.first ?? TerminalRegistry.systemDefault
     }
+
+    // MARK: - Hosts file state (operations live in AppModel+HostsFile.swift)
+
+    /// Sesh's block in /etc/hosts no longer matches the store (a macOS update,
+    /// a hand edit, another tool). Shown as a Re-apply banner; never auto-fixed.
+    var hostsOutOfSync = false
+
+    /// Lowercased hostnames enabled by /etc/hosts lines outside Sesh's block.
+    var hostsExternalHostnames: Set<String> = []
+
+    /// Bumped whenever a hosts write doesn't land (cancelled or failed), so
+    /// switches that optimistically flipped re-read the stored state.
+    var hostsRevision = 0
+
+    /// Set by the menu bar to ask the main window to open the hosts-entry
+    /// form; the window consumes and clears it.
+    var pendingHostsEdit: HostsEditRequest?
+
+    /// Set by the menu bar to ask the main window to show the /etc/hosts
+    /// sheet; the window consumes and clears it.
+    var pendingShowHostsFile = false
+
+    @ObservationIgnored let hostsWriter = HostsFileWriter()
 
     var pendingError: String?
     var showFirstRun = false

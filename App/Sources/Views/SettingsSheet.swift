@@ -128,6 +128,14 @@ struct SettingsSheet: View {
             } footer: {
                 Text("The config path tells Sesh where your ~/.ssh/config lives, for linking and importing. The managed file holds Sesh's own hosts and is Included from your config.")
             }
+
+            Section {
+                Button("Import from /etc/hosts") { model.importFromHostsFileAndReport() }
+            } header: {
+                Text("/etc/hosts")
+            } footer: {
+                Text("Moves the entries already in /etc/hosts into Sesh's section so you can toggle them. System entries and Docker's and SwitchHosts' sections are left alone. A backup goes to ~/Library/Application Support/Sesh/hosts-backups first.")
+            }
         }
         .formStyle(.grouped)
     }
@@ -136,7 +144,7 @@ struct SettingsSheet: View {
         Form {
             Section("About") {
                 LabeledContent("Version", value: appVersion)
-                Text("Sesh manages your SSH connections from the menu bar.")
+                Text("Sesh manages your SSH connections and /etc/hosts entries from the menu bar.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

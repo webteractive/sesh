@@ -82,3 +82,19 @@ import Foundation
     #expect(stamps == stamps.sorted())
     #expect(!remaining.isEmpty && remaining == remaining.sorted(by: >)) // newest first
 }
+
+@Test func backupIntoSeparateDirectory() throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+    try FileManager.default.createDirectory(atPath: dir + "/src", withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let source = dir + "/src/hosts"
+    try "127.0.0.1 localhost\n".write(toFile: source, atomically: true, encoding: .utf8)
+
+    let manager = BackupManager()
+    let backupPath = try manager.backup(configPath: source, into: dir + "/backups")
+
+    #expect(backupPath.hasPrefix(dir + "/backups/hosts.backup."))
+    #expect(try String(contentsOfFile: backupPath, encoding: .utf8) == "127.0.0.1 localhost\n")
+    #expect(manager.backupPaths(configPath: source, in: dir + "/backups") == [backupPath])
+    #expect(manager.backupPaths(configPath: source).isEmpty)
+}

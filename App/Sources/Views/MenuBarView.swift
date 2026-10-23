@@ -11,6 +11,9 @@ struct MenuBarView: View {
     // (sections come from `model.sections(from:)`) whenever a workspace is
     // created, renamed, or deleted.
     @Query private var workspaceEntities: [Workspace]
+    @Query(sort: HostsFileEntry.blockOrder)
+    private var hostsEntries: [HostsFileEntry]
+    @AppStorage("menuBarMode") private var mode: SidebarMode = .ssh
 
     @State private var query = ""
     @State private var selectedIndex = 0
@@ -110,13 +113,23 @@ struct MenuBarView: View {
                 Divider()
             }
 
-            TextField("Search hosts…", text: $query)
+            Picker("Mode", selection: $mode) {
+                Text("SSH").tag(SidebarMode.ssh)
+                Text("Hosts").tag(SidebarMode.hosts)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding([.horizontal, .top], 8)
+
+            TextField(mode == .hosts ? "Search hosts file…" : "Search hosts…", text: $query)
                 .textFieldStyle(.plain)
                 .padding(10)
                 .focused($searchFocused)
             Divider()
 
-            if hosts.isEmpty {
+            if mode == .hosts {
+                hostsContent
+            } else if hosts.isEmpty {
                 Text("No hosts yet")
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 16)
@@ -175,6 +188,7 @@ struct MenuBarView: View {
         .frame(width: 300)
         .onAppear {
             model.applyAppearance()
+            model.refreshHostsFileState()
             query = ""
             selectedIndex = 0
             // The window panel isn't key the instant it appears; focusing on the
@@ -182,8 +196,13 @@ struct MenuBarView: View {
             DispatchQueue.main.async { searchFocused = true }
         }
         .onChange(of: query) { _, _ in selectedIndex = 0 }
+        .onChange(of: mode) { _, _ in
+            query = ""
+            selectedIndex = 0
+            model.refreshHostsFileState()
+        }
         .onKeyPress(.downArrow) {
-            selectedIndex = min(selectedIndex + 1, max(0, displayGroups.count - 1)); return .handled
+            selectedIndex = min(selectedIndex + 1, max(0, selectableCount - 1)); return .handled
         }
         .onKeyPress(.upArrow) {
             selectedIndex = max(selectedIndex - 1, 0); return .handled
@@ -196,6 +215,16 @@ struct MenuBarView: View {
         }
     }
 
+    /// Hosts-file entries matching the search, in block order.
+    private var filteredHostsEntries: [HostsFileEntry] {
+        hostsEntries.filter { $0.matches(query) }
+    }
+
+    /// Row count keyboard selection walks in the current mode.
+    private var selectableCount: Int {
+        mode == .hosts ? filteredHostsEntries.count : displayGroups.count
+    }
+
     /// Whether `group` is the row at `selectedIndex` within `displayGroups`
     /// (the flat top-to-bottom order keyboard navigation walks, sectioned or not).
     private func isSelected(_ group: HostGroupView) -> Bool {
@@ -203,6 +232,14 @@ struct MenuBarView: View {
     }
 
     private func activateSelected() {
+        if mode == .hosts {
+            // Return toggles the selected entry.
+            let entries = filteredHostsEntries
+            guard entries.indices.contains(selectedIndex) else { return }
+            let entry = entries[selectedIndex]
+            model.setHostsEntry(entry, enabled: !entry.isEnabled)
+            return
+        }
         guard displayGroups.indices.contains(selectedIndex) else { return }
         let member = displayGroups[selectedIndex].defaultMember
         guard let entry = model.entry(forAlias: member.alias, in: hosts) else { return }
@@ -333,12 +370,83 @@ struct MenuBarView: View {
         .background(selected ? Color.accentColor.opacity(0.2) : .clear)
     }
 
+    /// Hosts mode: the out-of-sync banner and one row per entry with its
+    /// enable toggle. Adding and editing hand off to the main window.
+    @ViewBuilder
+    private var hostsContent: some View {
+        if model.hostsOutOfSync {
+            HostsOutOfSyncBanner()
+        }
+        if hostsEntries.isEmpty {
+            Text("No hosts file entries yet")
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 16)
+        } else if filteredHostsEntries.isEmpty {
+            Text("No matches")
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 16)
+        } else {
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(filteredHostsEntries.enumerated()), id: \.element.id) { index, entry in
+                        hostsRow(entry, selected: index == selectedIndex)
+                    }
+                }
+            }
+            // See the flat-mode note in `body` on why a definite height is required.
+            .frame(height: CGFloat(min(filteredHostsEntries.count, 8)) * Self.rowHeight)
+        }
+    }
+
+    private func hostsRow(_ entry: HostsFileEntry, selected: Bool) -> some View {
+        HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(entry.hostnames.joined(separator: ", ")).lineLimit(1)
+                Text(entry.ip).font(.caption).foregroundStyle(.secondary)
+            }
+            .opacity(entry.isEnabled ? 1 : 0.5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if model.isOverridden(entry) {
+                HostsOverrideIcon()
+            }
+
+            Button {
+                editHostsInWindow(.edit(entry.id))
+            } label: {
+                Image(systemName: "pencil")
+            }
+            .buttonStyle(.borderless)
+            .help("Edit in Sesh")
+
+            HostsEntryToggle(entry: entry)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: Self.rowHeight)
+        .background(selected ? Color.accentColor.opacity(0.2) : .clear)
+    }
+
     private var footer: some View {
         HStack {
             Button { openMainWindow() } label: {
                 Image(systemName: "macwindow")
             }
             .help("Open Sesh")
+            if mode == .hosts {
+                Spacer()
+                Button { editHostsInWindow(.create) } label: {
+                    Image(systemName: "plus")
+                }
+                .help("New Hosts Entry")
+                Spacer()
+                Button {
+                    model.pendingShowHostsFile = true
+                    openMainWindow()
+                } label: {
+                    Image(systemName: "doc.plaintext")
+                }
+                .help("View /etc/hosts")
+            }
             Spacer()
             Button { openSettings() } label: {
                 Image(systemName: "gearshape")
@@ -379,6 +487,12 @@ struct MenuBarView: View {
     /// open its edit form.
     private func editInWindow(_ entry: HostEntry) {
         model.pendingEditAlias = entry.host
+        openMainWindow()
+    }
+
+    /// Opens the main window on the hosts-entry form (new or edit).
+    private func editHostsInWindow(_ request: HostsEditRequest) {
+        model.pendingHostsEdit = request
         openMainWindow()
     }
 

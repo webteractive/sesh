@@ -2,6 +2,11 @@ import SwiftUI
 import SwiftData
 import SSHConfigCore
 
+/// Which list the sidebar (and the menu-bar panel, separately) is showing.
+enum SidebarMode: String {
+    case ssh, hosts
+}
+
 struct MainWindow: View {
     @Environment(AppModel.self) private var model
     @Environment(\.modelContext) private var context
@@ -11,6 +16,14 @@ struct MainWindow: View {
     // (sections come from `model.sections(from:)`) whenever a workspace is
     // created, renamed, or deleted.
     @Query private var workspaceEntities: [Workspace]
+    @Query(sort: HostsFileEntry.blockOrder)
+    private var hostsEntries: [HostsFileEntry]
+    @AppStorage("sidebarMode") private var mode: SidebarMode = .ssh
+    @State private var hostsSelection: Set<UUID> = []
+    @State private var hostsSearch = ""
+    @State private var hostsForm: HostsFormMode?
+    @State private var hostsDeleteRequest: Set<UUID>?
+    @State private var showHostsFile = false
     @State private var search = ""
     @State private var selection: Set<PersistentIdentifier> = []
     @State private var formMode: FormMode?
@@ -76,7 +89,9 @@ struct MainWindow: View {
         .onAppear {
             consumePendingEdit()
             consumePendingSettings()
+            consumePendingHostsEdit()
             restoreLastSelection()
+            model.refreshHostsFileState()
         }
         .onChange(of: model.pendingEditAlias) { _, _ in consumePendingEdit() }
         .onChange(of: model.pendingShowSettings) { _, _ in consumePendingSettings() }
@@ -89,11 +104,11 @@ struct MainWindow: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    openWindow(id: "raw-config")
+                    if mode == .hosts { showHostsFile = true } else { openWindow(id: "raw-config") }
                 } label: {
                     Label("Raw Config", systemImage: "doc.plaintext")
                 }
-                .help("View the managed ~/.ssh/sesh.conf")
+                .help(mode == .hosts ? "View /etc/hosts" : "View the managed ~/.ssh/sesh.conf")
             }
         }
         .sheet(item: $formMode) { mode in
@@ -225,7 +240,7 @@ struct MainWindow: View {
         Group {
             Button("") { showPalette.toggle() }
                 .keyboardShortcut("k", modifiers: .command)
-            Button("") { formMode = .create }
+            Button("") { if mode == .hosts { hostsForm = .create } else { formMode = .create } }
                 .keyboardShortcut("n", modifiers: .command)
             Button("") { showNewWorkspace = true }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
@@ -233,16 +248,39 @@ struct MainWindow: View {
                 .keyboardShortcut(",", modifiers: .command)
             Button("") { searchFocused = true }
                 .keyboardShortcut("f", modifiers: .command)
-            Button("") { if let e = selectedEntry { formMode = .edit(e) } }
+            Button("") {
+                if mode == .hosts {
+                    if let e = selectedHostsEntry { hostsForm = .edit(e) }
+                } else if let e = selectedEntry {
+                    formMode = .edit(e)
+                }
+            }
                 .keyboardShortcut("e", modifiers: .command)
-            Button("") { if let e = selectedEntry, e.isConnectable { model.connect(e) } }
+            Button("") { if mode == .ssh, let e = selectedEntry, e.isConnectable { model.connect(e) } }
                 .keyboardShortcut(.return, modifiers: .command)
-            Button("") { if let e = selectedEntry { model.copyCommand(e) } }
+            Button("") { if mode == .ssh, let e = selectedEntry { model.copyCommand(e) } }
                 .keyboardShortcut("c", modifiers: [.command, .shift])
-            Button("") { if let e = selectedEntry { duplicate(e) } }
+            Button("") {
+                if mode == .hosts {
+                    if let e = selectedHostsEntry { model.duplicateHostsEntry(e) }
+                } else if let e = selectedEntry {
+                    duplicate(e)
+                }
+            }
                 .keyboardShortcut("d", modifiers: .command)
         }
         .hidden()
+    }
+
+    /// The single selected hosts-file entry (Hosts File mode), else nil.
+    private var selectedHostsEntry: HostsFileEntry? {
+        guard hostsSelection.count == 1, let id = hostsSelection.first else { return nil }
+        return hostsEntries.first { $0.id == id }
+    }
+
+    private var hostsDeleteTitle: String {
+        let count = hostsDeleteRequest?.count ?? 0
+        return count == 1 ? "Delete this hosts entry?" : "Delete \(count) hosts entries?"
     }
 
     /// The single selected host, or nil when the selection is empty or multiple.
@@ -252,6 +290,59 @@ struct MainWindow: View {
     }
 
     private var sidebar: some View {
+        VStack(spacing: 0) {
+            Picker("Mode", selection: $mode) {
+                Text("SSH").tag(SidebarMode.ssh)
+                Text("Hosts File").tag(SidebarMode.hosts)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding([.horizontal, .top], 8)
+
+            switch mode {
+            case .ssh: sshSidebar
+            case .hosts:
+                HostsFileList(selection: $hostsSelection, search: $hostsSearch,
+                              searchFocused: $searchFocused,
+                              onNew: { hostsForm = .create },
+                              onEdit: { hostsForm = .edit($0) },
+                              onDelete: requestHostsDelete)
+            }
+        }
+        .navigationSplitViewColumnWidth(min: 220, ideal: 260)
+        // Hosts-mode presentations live here rather than on `body`, whose
+        // modifier chain is already at the type checker's limit.
+        .onChange(of: model.pendingHostsEdit) { _, _ in consumePendingHostsEdit() }
+        .onChange(of: model.pendingShowHostsFile) { _, _ in consumePendingShowHostsFile() }
+        .onChange(of: mode) { _, _ in model.refreshHostsFileState() }
+        .onAppear { consumePendingShowHostsFile() }
+        .sheet(isPresented: $showHostsFile) {
+            HostsFileSheet()
+        }
+        .sheet(item: $hostsForm) { mode in
+            HostsEntryFormSheet(mode: mode)
+        }
+        .confirmationDialog(
+            hostsDeleteTitle,
+            isPresented: .init(
+                get: { hostsDeleteRequest != nil },
+                set: { if !$0 { hostsDeleteRequest = nil } }
+            )
+        ) {
+            Button("Delete", role: .destructive) {
+                if let ids = hostsDeleteRequest {
+                    model.deleteHostsEntries(ids)
+                    hostsSelection.subtract(ids)
+                }
+                hostsDeleteRequest = nil
+            }
+            Button("Cancel", role: .cancel) { hostsDeleteRequest = nil }
+        } message: {
+            Text("The lines are removed from /etc/hosts.")
+        }
+    }
+
+    private var sshSidebar: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 TextField("Search hosts", text: $search)
@@ -301,11 +392,48 @@ struct MainWindow: View {
             }
             .onDeleteCommand { requestDeleteSelection() }
         }
-        .navigationSplitViewColumnWidth(min: 220, ideal: 260)
     }
 
     @ViewBuilder
     private var detailContent: some View {
+        if mode == .hosts {
+            hostsDetailContent
+        } else {
+            sshDetailContent
+        }
+    }
+
+    @ViewBuilder
+    private var hostsDetailContent: some View {
+        if let entry = selectedHostsEntry {
+            HostsEntryDetailView(entry: entry,
+                                 onEdit: { hostsForm = .edit($0) },
+                                 onDelete: { requestHostsDelete([$0.id]) })
+        } else if hostsEntries.isEmpty {
+            ContentUnavailableView {
+                Label("No Hosts Entries", systemImage: "network")
+            } description: {
+                Text("Press ⌘N to add one, or import the entries already in /etc/hosts.")
+            } actions: {
+                Button {
+                    model.importFromHostsFileAndReport()
+                } label: {
+                    Label("Import from /etc/hosts", systemImage: "square.and.arrow.down")
+                }
+            }
+        } else if hostsSelection.isEmpty {
+            ContentUnavailableView("No Entry Selected",
+                                   systemImage: "network",
+                                   description: Text("Select an entry, or press ⌘N to add one."))
+        } else {
+            ContentUnavailableView("\(hostsSelection.count) Entries Selected",
+                                   systemImage: "network",
+                                   description: Text("Select a single entry to view its details."))
+        }
+    }
+
+    @ViewBuilder
+    private var sshDetailContent: some View {
         if selection.count == 1, let id = selection.first,
            let entry = hosts.first(where: { $0.persistentModelID == id }) {
             HostDetailView(entry: entry,
@@ -354,6 +482,38 @@ struct MainWindow: View {
         selection = [entry.persistentModelID]
         formMode = .edit(entry)
         model.pendingEditAlias = nil
+    }
+
+    /// Handles a menu-bar hosts-entry request: switches to Hosts File mode and
+    /// opens the new/edit form, then clears the signal.
+    private func consumePendingHostsEdit() {
+        guard let request = model.pendingHostsEdit else { return }
+        mode = .hosts
+        switch request {
+        case .create:
+            hostsForm = .create
+        case .edit(let id):
+            if let entry = hostsEntries.first(where: { $0.id == id }) {
+                hostsSearch = ""
+                hostsSelection = [id]
+                hostsForm = .edit(entry)
+            }
+        }
+        model.pendingHostsEdit = nil
+    }
+
+    /// Handles a menu-bar request to view /etc/hosts: switches to Hosts File
+    /// mode and shows the sheet, then clears the signal.
+    private func consumePendingShowHostsFile() {
+        guard model.pendingShowHostsFile else { return }
+        mode = .hosts
+        showHostsFile = true
+        model.pendingShowHostsFile = false
+    }
+
+    private func requestHostsDelete(_ ids: Set<UUID>) {
+        guard !ids.isEmpty else { return }
+        hostsDeleteRequest = ids
     }
 
     /// Opens the Settings sheet when the menu bar requested it.

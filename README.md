@@ -1,7 +1,7 @@
 # Sesh
 
-Native macOS menu-bar app for managing SSH connections. **The app is the source
-of truth**: you manage hosts in Sesh, and it exports them to an app-owned
+Native macOS menu-bar app for managing SSH connections and `/etc/hosts`
+entries. **The app is the source of truth**: you manage hosts in Sesh, and it exports them to an app-owned
 `~/.ssh/sesh.conf` that's linked into your `~/.ssh/config` via a single
 `Include` line. Your existing config is never rewritten.
 
@@ -19,6 +19,20 @@ of truth**: you manage hosts in Sesh, and it exports them to an app-owned
 - Connection profiles: one host, multiple user+identity profiles (real ssh
   aliases); pick one from the Connect menu, menu bar, or ⌘K
 - Workspaces to organize hosts into collapsible groups
+- `/etc/hosts` management: add, edit, and enable/disable entries from the
+  window's **Hosts File** view or the menu bar's **Hosts** tab. Sesh owns one
+  marked section at the end of `/etc/hosts` (disabled entries are written as
+  commented-out lines), asks for your administrator password when it writes
+  (macOS remembers it for a few minutes), and flushes the DNS cache. Enabling
+  an entry turns off any other Sesh entry for the same hostname. If the file
+  changes behind Sesh's back, a **Re-apply** banner appears; Sesh never
+  rewrites the file on its own. The toolbar's Raw Config button (or the menu
+  bar's Hosts tab) shows the whole `/etc/hosts` in a sheet, with Sesh's section
+  highlighted
+- Optional one-off **Import from /etc/hosts** that moves your existing entries
+  (including commented-out ones, as disabled) into Sesh's section, after a
+  backup to `~/Library/Application Support/Sesh/hosts-backups`. System entries
+  and Docker Desktop's and SwitchHosts' sections are left alone
 - ⌘K command palette; searchable menu-bar panel; raw viewer of the managed file
 - Light/Dark/System appearance and a tabbed Settings window
 - Menu-bar-first app: the Dock icon appears only while a window is open
@@ -28,12 +42,12 @@ of truth**: you manage hosts in Sesh, and it exports them to an app-owned
 | Shortcut | Action |
 |----------|--------|
 | ⌘K | Command palette |
-| ⌘N | New host |
+| ⌘N | New host (or hosts entry in Hosts File view) |
 | ⌘⇧N | New workspace |
-| ⌘E | Edit selected host |
+| ⌘E | Edit selected host or hosts entry |
 | ⌘↩ | Connect selected host |
 | ⌘⇧C | Copy ssh command |
-| ⌘D | Duplicate selected host |
+| ⌘D | Duplicate selected host or hosts entry |
 | ⌘F | Focus search |
 | ⌘, | Settings |
 | ⌫ | Delete selection |
