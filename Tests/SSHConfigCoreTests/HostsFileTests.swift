@@ -223,18 +223,28 @@ private let aLive = HostsLine(ip: "1.2.3.4", hostnames: ["a.test"])
 // MARK: - Privileged write script
 
 @Test func privilegedScriptEscapesPathsForAppleScript() {
-    let script = HostsFile.privilegedWriteScript(stagedPath: "/tmp/a\"b\\c", targetPath: "/private/etc/hosts")
+    let script = HostsFile.privilegedWriteScript(stagedPath: "/tmp/a\"b\\c", targetPath: "/private/etc/hosts", ownerUID: 501)
     #expect(script.contains(#"quoted form of "/tmp/a\"b\\c""#))
-    #expect(script.contains(#"quoted form of "/private/etc/hosts.sesh-new""#))
+    #expect(script.contains(#"quoted form of "/private/etc/hosts""#))
     #expect(script.hasSuffix("with administrator privileges"))
 }
 
-@Test func privilegedScriptReplacesAtomicallyAfterGuards() {
-    let script = HostsFile.privilegedWriteScript(stagedPath: "/tmp/x", targetPath: "/private/etc/hosts")
-    #expect(script.contains("[ -f "))
-    #expect(script.contains("[ ! -L "))
-    #expect(script.contains("[ -s "))
-    #expect(script.contains("/usr/bin/install -m 0644 -o root -g wheel "))
-    #expect(script.contains("/bin/mv -f "))
-    #expect(!script.contains(" > "))   // never truncate the live file in place
+@Test func privilegedScriptReadsOnlyThroughOneCheckedDescriptor() {
+    let script = HostsFile.privilegedWriteScript(stagedPath: "/tmp/x", targetPath: "/private/etc/hosts", ownerUID: 501)
+    // Root opens the staged path once and checks what it actually opened, so a
+    // symlink swapped in after a path check can't make root read another file.
+    #expect(script.contains("exec 3< "))
+    #expect(script.contains("[ -f /dev/fd/3 ]"))
+    #expect(script.contains("[ $(/usr/bin/stat -f %u /dev/fd/3) = 501 ]"))
+    #expect(script.contains("/bin/cat <&3 > $n"))
+    #expect(!script.contains("/usr/bin/install"))
+}
+
+@Test func privilegedScriptReplacesAtomically() {
+    let script = HostsFile.privilegedWriteScript(stagedPath: "/tmp/x", targetPath: "/private/etc/hosts", ownerUID: 501)
+    #expect(script.contains("/usr/bin/mktemp "))
+    #expect(script.contains("/usr/sbin/chown root:wheel $n"))
+    #expect(script.contains("/bin/chmod 0644 $n"))
+    #expect(script.contains("/bin/mv -f $n "))
+    #expect(!script.contains("> /private/etc/hosts"))   // never truncate the live file in place
 }

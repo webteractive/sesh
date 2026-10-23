@@ -36,7 +36,7 @@ struct HostsFileWriter {
 
         // /etc is a symlink to /private/etc; stage and rename in the real directory.
         let target = URL(fileURLWithPath: Self.hostsPath).resolvingSymlinksInPath().path
-        let source = HostsFile.privilegedWriteScript(stagedPath: temp.path, targetPath: target)
+        let source = HostsFile.privilegedWriteScript(stagedPath: temp.path, targetPath: target, ownerUID: getuid())
         guard let script = NSAppleScript(source: source) else {
             throw HostsWriteError.failed("Couldn't prepare the hosts file update.")
         }

@@ -231,23 +231,31 @@ public enum HostsFile {
     }
 
     /// AppleScript that replaces `targetPath` with the staged file as root.
-    /// Only fixed text and the two paths (as AppleScript string literals run
-    /// through `quoted form of`) appear, so no entry text reaches the shell.
-    /// The staged file must be a regular, non-empty, non-symlink file; it is
-    /// installed beside the target as root:wheel 0644 and renamed over it, so
-    /// the live file is replaced in one step and never left truncated. DNS
+    /// Only fixed text, the two paths (as AppleScript string literals run
+    /// through `quoted form of`) and a numeric uid appear, so no entry text
+    /// reaches the shell.
+    ///
+    /// Root opens the staged path exactly once (fd 3) and checks what it
+    /// actually opened — a regular, non-empty file owned by `ownerUID` — then
+    /// copies from that descriptor. Checking the path and reading it again
+    /// would let a same-user process swap in a symlink between the two and
+    /// have root copy a root-only file into world-readable /etc/hosts; a
+    /// swapped symlink now opens a file whose owner fails the check. The copy
+    /// lands in a root-owned mktemp file beside the target, gets root:wheel
+    /// 0644, and is renamed over it, so the live file is never truncated. DNS
     /// flush failures don't fail the script — the file has already landed.
-    public static func privilegedWriteScript(stagedPath: String, targetPath: String) -> String {
+    public static func privilegedWriteScript(stagedPath: String, targetPath: String, ownerUID: UInt32) -> String {
         func literal(_ s: String) -> String {
             "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
         }
         return """
         set p to quoted form of \(literal(stagedPath))
-        set n to quoted form of \(literal(targetPath + ".sesh-new"))
+        set m to quoted form of \(literal(targetPath + ".sesh-XXXXXX"))
         set t to quoted form of \(literal(targetPath))
-        do shell script "[ -f " & p & " ] && [ ! -L " & p & " ] && [ -s " & p & " ] && \
-        /usr/bin/install -m 0644 -o root -g wheel " & p & " " & n & " && /bin/mv -f " & n & " " & t & \
-        " && (/usr/bin/dscacheutil -flushcache; /usr/bin/killall -HUP mDNSResponder; true)" \
+        do shell script "exec 3< " & p & " && [ -f /dev/fd/3 ] && [ $(/usr/bin/stat -f %u /dev/fd/3) = \(ownerUID) ] && \
+        [ -s /dev/fd/3 ] && n=$(/usr/bin/mktemp " & m & ") && { /bin/cat <&3 > $n && /usr/sbin/chown root:wheel $n && \
+        /bin/chmod 0644 $n && /bin/mv -f $n " & t & " || { /bin/rm -f $n; false; }; } && \
+        (/usr/bin/dscacheutil -flushcache; /usr/bin/killall -HUP mDNSResponder; true)" \
         with administrator privileges
         """
     }
