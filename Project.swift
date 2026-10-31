@@ -16,7 +16,7 @@ let project = Project(
             infoPlist: .extendingDefault(with: [
                 "CFBundleName": "Sesh",
                 "CFBundleDisplayName": "Sesh",
-                "CFBundleShortVersionString": "0.1.5",
+                "CFBundleShortVersionString": "0.1.6",
                 // The commit a release is built from (scripts/package.sh sets
                 // it); `sesh --version` prints it beside the version.
                 "SeshCommit": "$(SESH_COMMIT)",
