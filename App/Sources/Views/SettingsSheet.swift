@@ -13,6 +13,8 @@ struct SettingsSheet: View {
     @State private var managedPathDraft = ""
     @State private var managedPathError: String?
     @State private var showResetConfirm = false
+    @State private var commandLineError: String?
+    @State private var commandLineRevision = 0
     @State private var selectedTab = "general"
 
     private var appVersion: String {
@@ -90,6 +92,8 @@ struct SettingsSheet: View {
                     }
                 }
             }
+
+            commandLineSection
 
             Section("Appearance") {
                 Picker("Theme", selection: Binding(
@@ -232,24 +236,50 @@ struct SettingsSheet: View {
         }
     }
 
-    /// Commits the managed-path draft: trims, rejects empty, and rejects a value
-    /// that would alias the real config path (which would let export overwrite
-    /// ~/.ssh/config instead of the managed fragment).
+    /// Commits the managed-path draft once `ConfigPathStore.validateManaged`
+    /// accepts it: inside ~/.ssh, not the real config (which export would
+    /// overwrite), and nothing that breaks the Include line.
     private func commitManagedPath() {
-        let trimmed = managedPathDraft.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else {
-            managedPathError = "Managed file path is required."
-            return
+        switch ConfigPathStore.validateManaged(managedPathDraft, configPath: path) {
+        case .failure(let message):
+            managedPathError = message
+        case .success(let trimmed):
+            managedPathError = nil
+            model.managedPath = trimmed
+            managedPathDraft = trimmed
         }
-        let expandedManaged = (trimmed as NSString).expandingTildeInPath
-        let expandedConfig = (path as NSString).expandingTildeInPath
-        guard expandedManaged != expandedConfig else {
-            managedPathError = "Managed file path can't be your main ~/.ssh/config."
-            return
+    }
+
+    private var commandLineSection: some View {
+        // Read from disk on every redraw; bumping the revision after an install
+        // forces one.
+        let _ = commandLineRevision
+        return Section {
+            switch model.commandLineState {
+            case .installed:
+                Label("sesh is installed at \(CommandLineInstall.linkPath)", systemImage: "checkmark.circle")
+                    .foregroundStyle(.green)
+                    .font(.callout)
+            case .notInstalled, .linkedElsewhere:
+                Button("Install sesh Command") { installCommandLineTool() }
+            case .blocked:
+                Text("\(CommandLineInstall.linkPath) is a file Sesh didn't put there, so it's left alone.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            if let commandLineError {
+                Text(commandLineError).foregroundStyle(.red).font(.callout)
+            }
+        } header: {
+            Text("Command Line")
+        } footer: {
+            Text("The sesh command does from Terminal (or for an AI agent) what Sesh does here. Installing links \(CommandLineInstall.linkPath) to the copy inside Sesh, so it updates with the app; it asks for your administrator password.")
         }
-        managedPathError = nil
-        model.managedPath = trimmed
-        managedPathDraft = trimmed
+    }
+
+    private func installCommandLineTool() {
+        commandLineError = model.installCommandLineTool()
+        commandLineRevision += 1
     }
 
     @ViewBuilder

@@ -37,3 +37,22 @@ private let exporter = ConfigExporter()
     #expect((attrs[.posixPermissions] as? NSNumber)?.int16Value == 0o600)
     #expect(try String(contentsOfFile: path, encoding: .utf8).contains("Host web"))
 }
+
+@Test func writeRefusesLineBreaksAndForeignFiles() throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+    try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let path = dir + "/sesh.conf"
+
+    let injected = RenderableHost(host: "x", properties: [SSHProperty(key: "HostName", values: ["h\nMatch exec \"sh\""])])
+    #expect(throws: ConfigExportError.self) { try exporter.write([injected], toPath: path) }
+    #expect(!FileManager.default.fileExists(atPath: path))
+
+    // Sesh's own file (or an empty one) is rewritten; anything else is left alone.
+    try exporter.write([RenderableHost(host: "web", properties: [])], toPath: path)
+    try exporter.write([RenderableHost(host: "db", properties: [])], toPath: path)
+    let foreign = dir + "/zshenv"
+    try "export PATH=/bin\n".write(toFile: foreign, atomically: true, encoding: .utf8)
+    #expect(throws: ConfigExportError.self) { try exporter.write([RenderableHost(host: "web", properties: [])], toPath: foreign) }
+    #expect(try String(contentsOfFile: foreign, encoding: .utf8) == "export PATH=/bin\n")
+}

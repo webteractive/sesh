@@ -23,8 +23,9 @@ struct HostsFileWriter {
     /// Replaces /etc/hosts with `contents`, then flushes the DNS cache. The
     /// script (`HostsFile.privilegedWriteScript`) is fixed text plus the
     /// quoted paths of an app-generated temp file and the real hosts file —
-    /// entry text never reaches the root shell.
-    func write(_ contents: String) throws {
+    /// entry text never reaches the root shell. `prompt` tells the user, in
+    /// the password dialog, what the write changes.
+    func write(_ contents: String, prompt: String) throws {
         let dir = URL.applicationSupportDirectory.appending(path: "Sesh", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let temp = dir.appending(path: "hosts.pending-\(UUID().uuidString)")
@@ -36,7 +37,8 @@ struct HostsFileWriter {
 
         // /etc is a symlink to /private/etc; stage and rename in the real directory.
         let target = URL(fileURLWithPath: Self.hostsPath).resolvingSymlinksInPath().path
-        let source = HostsFile.privilegedWriteScript(stagedPath: temp.path, targetPath: target, ownerUID: getuid())
+        let source = HostsFile.privilegedWriteScript(stagedPath: temp.path, targetPath: target, ownerUID: getuid(),
+                                                     prompt: prompt)
         guard let script = NSAppleScript(source: source) else {
             throw HostsWriteError.failed("Couldn't prepare the hosts file update.")
         }

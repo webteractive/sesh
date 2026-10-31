@@ -24,6 +24,9 @@ struct MainWindow: View {
     @State private var hostsForm: HostsFormMode?
     @State private var hostsDeleteRequest: Set<UUID>?
     @State private var showHostsFile = false
+    @State private var showHostsBulkAdd = false
+    @State private var exportKind: ArchiveKind?
+    @State private var pendingImport: PendingImport?
     @State private var search = ""
     @State private var selection: Set<PersistentIdentifier> = []
     @State private var formMode: FormMode?
@@ -83,13 +86,14 @@ struct MainWindow: View {
         NavigationSplitView {
             sidebar
         } detail: {
-            detailContent
+            detailPane
         }
         .navigationTitle("Sesh")
         .onAppear {
             consumePendingEdit()
             consumePendingSettings()
             consumePendingHostsEdit()
+            consumePendingArchive()
             restoreLastSelection()
             model.refreshHostsFileState()
         }
@@ -101,16 +105,7 @@ struct MainWindow: View {
                 model.lastSelectedAlias = entry.host
             }
         }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    if mode == .hosts { showHostsFile = true } else { openWindow(id: "raw-config") }
-                } label: {
-                    Label("Raw Config", systemImage: "doc.plaintext")
-                }
-                .help(mode == .hosts ? "View /etc/hosts" : "View the managed ~/.ssh/sesh.conf")
-            }
-        }
+        .toolbar { toolbarItems }
         .sheet(item: $formMode) { mode in
             HostFormSheet(mode: mode)
         }
@@ -223,6 +218,10 @@ struct MainWindow: View {
                         switch action {
                         case .newHost: formMode = .create
                         case .importFromConfig: importNow()
+                        case .exportSSHHosts: exportKind = .sshHosts
+                        case .exportHostsFile: exportKind = .hostsFile
+                        case .importSSHHosts: openImport(.sshHosts)
+                        case .importHostsFile: openImport(.hostsFile)
                         case .rawConfig: openWindow(id: "raw-config")
                         case .settings: showSettings = true
                         }
@@ -232,6 +231,31 @@ struct MainWindow: View {
             }
         }
         .background { shortcuts }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarItems: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Button { openImport(archiveKind) } label: {
+                Label("Import", systemImage: "square.and.arrow.down")
+            }
+            .help(mode == .hosts ? "Import hosts-file entries from an export file"
+                                 : "Import SSH hosts from an export file")
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button { exportKind = archiveKind } label: {
+                Label("Export", systemImage: "square.and.arrow.up")
+            }
+            .help(mode == .hosts ? "Export hosts-file entries to a file" : "Export SSH hosts to a file")
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                if mode == .hosts { showHostsFile = true } else { openWindow(id: "raw-config") }
+            } label: {
+                Label("Raw Config", systemImage: "doc.plaintext")
+            }
+            .help(mode == .hosts ? "View /etc/hosts" : "View the managed ~/.ssh/sesh.conf")
+        }
     }
 
     /// Hidden buttons that back the window's global keyboard shortcuts. Actions
@@ -305,6 +329,7 @@ struct MainWindow: View {
                 HostsFileList(selection: $hostsSelection, search: $hostsSearch,
                               searchFocused: $searchFocused,
                               onNew: { hostsForm = .create },
+                              onBulkAdd: { showHostsBulkAdd = true },
                               onEdit: { hostsForm = .edit($0) },
                               onDelete: requestHostsDelete)
             }
@@ -321,6 +346,9 @@ struct MainWindow: View {
         }
         .sheet(item: $hostsForm) { mode in
             HostsEntryFormSheet(mode: mode)
+        }
+        .sheet(isPresented: $showHostsBulkAdd) {
+            HostsBulkAddSheet()
         }
         .confirmationDialog(
             hostsDeleteTitle,
@@ -394,6 +422,16 @@ struct MainWindow: View {
         }
     }
 
+    /// The detail column, carrying the export and import sheets — here
+    /// rather than on `body`, whose modifier chain is at the type checker's
+    /// limit.
+    private var detailPane: some View {
+        detailContent
+            .sheet(item: $exportKind) { ExportSheet(kind: $0) }
+            .sheet(item: $pendingImport) { ImportSheet(kind: $0.kind, archive: $0.archive) }
+            .onChange(of: model.pendingArchive) { _, _ in consumePendingArchive() }
+    }
+
     @ViewBuilder
     private var detailContent: some View {
         if mode == .hosts {
@@ -413,12 +451,17 @@ struct MainWindow: View {
             ContentUnavailableView {
                 Label("No Hosts Entries", systemImage: "network")
             } description: {
-                Text("Press ⌘N to add one, or import the entries already in /etc/hosts.")
+                Text("Press ⌘N to add one, paste several at once, or import the entries already in /etc/hosts.")
             } actions: {
                 Button {
                     model.importFromHostsFileAndReport()
                 } label: {
                     Label("Import from /etc/hosts", systemImage: "square.and.arrow.down")
+                }
+                Button {
+                    showHostsBulkAdd = true
+                } label: {
+                    Label("Add from Text…", systemImage: "text.badge.plus")
                 }
             }
         } else if hostsSelection.isEmpty {
@@ -492,6 +535,8 @@ struct MainWindow: View {
         switch request {
         case .create:
             hostsForm = .create
+        case .bulkAdd:
+            showHostsBulkAdd = true
         case .edit(let id):
             if let entry = hostsEntries.first(where: { $0.id == id }) {
                 hostsSearch = ""
@@ -660,23 +705,10 @@ struct MainWindow: View {
     }
 
 
-    /// Laravel's DuplicateSshConfigAction: unique "-copy-N" suffix, then sync.
     private func duplicate(_ entry: HostEntry) {
-        let existing = Set(hosts.map(\.host))
-        var newHost = entry.host
-        var counter = 1
-        while existing.contains(newHost) {
-            newHost = "\(entry.host)-copy-\(counter)"
-            counter += 1
-        }
-        let duplicated = HostEntry(host: newHost, properties: entry.properties, rawBlock: nil)
-        duplicated.displayName = entry.displayName
-        context.insert(duplicated)
         do {
-            try context.save()
-            model.exportNow()
+            _ = try model.duplicateHost(entry)
         } catch {
-            context.rollback()
             model.pendingError = error.localizedDescription
         }
     }
@@ -721,14 +753,7 @@ struct MainWindow: View {
     private func deleteGroup(_ group: HostGroupView) {
         let entries = group.members.compactMap { model.entry(forAlias: $0.alias, in: hosts) }
         for entry in entries { selection.remove(entry.persistentModelID) }
-        for entry in entries { context.delete(entry) }
-        do {
-            try context.save()
-            model.exportNow()
-        } catch {
-            context.rollback()
-            model.pendingError = error.localizedDescription
-        }
+        deleteHosts(groupKeys: Set(entries.map { $0.groupName ?? $0.host }))
     }
 
     /// Expands each selected id to its full logical host (group) before
@@ -736,16 +761,44 @@ struct MainWindow: View {
     /// with it.
     private func deleteMultiple(_ ids: Set<PersistentIdentifier>) {
         let selected = hosts.filter { ids.contains($0.persistentModelID) }
-        let groupKeys = Set(selected.map { $0.groupName ?? $0.host })
-        let entries = hosts.filter { groupKeys.contains($0.groupName ?? $0.host) }
-        for entry in entries { context.delete(entry) }
         selection = []
+        deleteHosts(groupKeys: Set(selected.map { $0.groupName ?? $0.host }))
+    }
+
+    private func deleteHosts(groupKeys: Set<String>) {
         do {
-            try context.save()
-            model.exportNow()
+            try model.deleteHosts(groupKeys: groupKeys)
         } catch {
-            context.rollback()
             model.pendingError = error.localizedDescription
+        }
+    }
+
+    /// Export and import cover the side the sidebar is showing.
+    private var archiveKind: ArchiveKind { mode == .hosts ? .hostsFile : .sshHosts }
+
+    /// Handles a menu-bar export or import request, switching to the
+    /// matching side first, then clears the signal.
+    private func consumePendingArchive() {
+        guard let request = model.pendingArchive else { return }
+        model.pendingArchive = nil
+        switch request {
+        case .export(let kind):
+            mode = kind == .hostsFile ? .hosts : .ssh
+            exportKind = kind
+        case .importFile(let kind):
+            mode = kind == .hostsFile ? .hosts : .ssh
+            openImport(kind)
+        }
+    }
+
+    /// Asks for an export file and, once it reads cleanly, opens the import
+    /// sheet on its `kind` items; an unreadable file, or one with none of
+    /// them, is reported through the alert.
+    private func openImport(_ kind: ArchiveKind) {
+        do {
+            if let archive = try model.openArchive(kind) { pendingImport = PendingImport(kind: kind, archive: archive) }
+        } catch {
+            model.pendingError = (error as? AppModel.ArchiveError)?.message ?? error.localizedDescription
         }
     }
 

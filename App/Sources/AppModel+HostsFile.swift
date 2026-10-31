@@ -4,6 +4,7 @@ import SSHConfigCore
 
 enum HostsEditRequest: Equatable {
     case create
+    case bulkAdd
     case edit(UUID)
 }
 
@@ -72,16 +73,35 @@ extension AppModel {
     /// Enables or disables one entry. Enabling disables any other enabled
     /// entry sharing a hostname, in the same write.
     func setHostsEntry(_ entry: HostsFileEntry, enabled: Bool) {
+        if let message = setHostsEntries([entry], enabled: enabled) { pendingError = message }
+    }
+
+    /// Enables or disables `targets` in one write, so one password prompt.
+    /// Enabling also disables other enabled entries sharing a hostname; two
+    /// targets sharing one can't both be enabled, so that's refused. Returns
+    /// an error message, or nil when written or the prompt was cancelled
+    /// (`hostsRevision` moves on a cancel).
+    func setHostsEntries(_ targets: [HostsFileEntry], enabled: Bool) -> String? {
+        let ids = Set(targets.map(\.id))
+        if enabled, let clash = HostsFile.sharedHostname(in: targets.map(\.hostnames)) {
+            return "Two of those entries map \(clash), and only one can be on. Enable one of them."
+        }
         let entries = hostsEntries
         var plan = entries.map { HostsPlanItem(id: $0.id, line: $0.line) }
-        guard let i = plan.firstIndex(where: { $0.id == entry.id }) else { return }
-        plan[i].line.isEnabled = enabled
-        let disabled = enabled ? disableConflicts(enabling: entry.id, in: &plan) : []
-        guard report(writeHostsFile(plan.map(\.line))) else { return }
-        entry.isEnabled = enabled
-        entry.updatedAt = .now
-        markDisabled(disabled, in: entries)
-        if let message = commitHostsChange() { pendingError = message }
+        var disabled = Set<UUID>()
+        for i in plan.indices where ids.contains(plan[i].id) { plan[i].line.isEnabled = enabled }
+        if enabled {
+            for id in ids { disabled.formUnion(disableConflicts(enabling: id, in: &plan)) }
+        }
+        let outcome = writeHostsFile(plan.map(\.line))
+        if case .failed(let message) = outcome { hostsRevision += 1; return message }
+        guard case .written = outcome else { hostsRevision += 1; return nil }
+        for entry in entries where ids.contains(entry.id) && entry.isEnabled != enabled {
+            entry.isEnabled = enabled
+            entry.updatedAt = .now
+        }
+        markDisabled(disabled.subtracting(ids), in: entries)
+        return commitHostsChange()
     }
 
     /// Adds a disabled copy right after the store's last entry — disabled so
@@ -130,30 +150,26 @@ extension AppModel {
         }
         guard !candidates.isEmpty else { return (0, 0) }
 
-        let merge = HostsFile.mergeImport(existing: entries.map { (id: $0.id, line: $0.line) },
-                                          candidates: candidates)
-        let kept = entries.map { entry -> HostsLine in
-            var line = entry.line
-            if merge.enable.contains(entry.id) { line.isEnabled = true }
-            if merge.disable.contains(entry.id) { line.isEnabled = false }
-            return line
+        let result = mergeIntoHostsFile(candidates) { try HostsFile.importCandidates(in: $0).remaining }
+        guard report(result.outcome) else { return nil }
+        return (result.added, result.skipped)
+    }
+
+    /// What adding `lines` would do, for the bulk-add sheet's summary.
+    func previewHostsMerge(_ lines: [HostsLine]) -> HostsImportMerge<UUID> {
+        HostsFile.mergeImport(existing: hostsEntries.map { (id: $0.id, line: $0.line) }, candidates: lines)
+    }
+
+    /// Adds pasted lines (see `HostsFile.parseBulk`) in one write, merged the
+    /// way import is: the first enabled line for a name wins, Sesh entries
+    /// clashing with it are turned off, and lines already in the store are not
+    /// duplicated. Returns an error message for the sheet, or nil on success.
+    func addHostsEntries(_ lines: [HostsLine]) -> String? {
+        switch mergeIntoHostsFile(lines).outcome {
+        case .written: return nil
+        case .cancelled: hostsRevision += 1; return "Cancelled — /etc/hosts wasn't changed."
+        case .failed(let message): hostsRevision += 1; return message
         }
-        let outcome = writeHostsFile(kept + merge.added) {
-            try HostsFile.importCandidates(in: $0).remaining
-        }
-        guard report(outcome) else { return nil }
-        for entry in entries where merge.enable.contains(entry.id) || merge.disable.contains(entry.id) {
-            entry.isEnabled = merge.enable.contains(entry.id)
-            entry.updatedAt = .now
-        }
-        var order = nextHostsSortOrder(after: entries)
-        for line in merge.added {
-            context.insert(HostsFileEntry(ip: line.ip, hostnames: line.hostnames, note: line.note,
-                                          isEnabled: line.isEnabled, sortOrder: order))
-            order += 1
-        }
-        if let message = commitHostsChange() { pendingError = message; return nil }
-        return (merge.added.count, merge.skipped)
     }
 
     /// Runs the import and reports the result through the shared alert.
@@ -209,6 +225,37 @@ extension AppModel {
         }
     }
 
+    /// Folds `candidates` into the store with `HostsFile.mergeImport` and
+    /// writes the result (after `transform`, for import), committing the
+    /// store only once the write lands.
+    private func mergeIntoHostsFile(_ candidates: [HostsLine],
+                                    transform: (String) throws -> String = { $0 })
+        -> (outcome: HostsWriteOutcome, added: Int, skipped: Int) {
+        let entries = hostsEntries
+        let merge = HostsFile.mergeImport(existing: entries.map { (id: $0.id, line: $0.line) },
+                                          candidates: candidates)
+        let kept = entries.map { entry -> HostsLine in
+            var line = entry.line
+            if merge.enable.contains(entry.id) { line.isEnabled = true }
+            if merge.disable.contains(entry.id) { line.isEnabled = false }
+            return line
+        }
+        let outcome = writeHostsFile(kept + merge.added, transform: transform)
+        guard case .written = outcome else { return (outcome, 0, 0) }
+        for entry in entries where merge.enable.contains(entry.id) || merge.disable.contains(entry.id) {
+            entry.isEnabled = merge.enable.contains(entry.id)
+            entry.updatedAt = .now
+        }
+        var order = nextHostsSortOrder(after: entries)
+        for line in merge.added {
+            context.insert(HostsFileEntry(ip: line.ip, hostnames: line.hostnames, note: line.note,
+                                          isEnabled: line.isEnabled, sortOrder: order))
+            order += 1
+        }
+        if let message = commitHostsChange() { return (.failed(message), 0, 0) }
+        return (.written, merge.added.count, merge.skipped)
+    }
+
     /// Renders `lines` into Sesh's block of the current file (optionally
     /// transformed first, for import) and writes it as root, backing up
     /// first. An unchanged file is not rewritten, so no prompt appears.
@@ -219,7 +266,7 @@ extension AppModel {
             let updated = try HostsFile.replacingBlock(in: transform(current), with: lines)
             guard updated != current else { return .written }
             try BackupManager().backup(configPath: HostsFileWriter.hostsPath, into: Self.hostsBackupDirectory)
-            try hostsWriter.write(updated)
+            try hostsWriter.write(updated, prompt: HostsFile.changeSummary(from: current, to: updated))
             return .written
         } catch HostsWriteError.cancelled {
             return .cancelled

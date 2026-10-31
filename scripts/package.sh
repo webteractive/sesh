@@ -75,27 +75,34 @@ if [ "$MODE" = preflight ]; then
 fi
 
 tuist generate --no-open
+# SESH_COMMIT lands in Info.plist, so `sesh --version` names the build.
+# Packages build at the revisions in .package.resolved or not at all.
 xcodebuild -workspace sshconfig.xcworkspace -scheme Sesh -configuration Release \
-  -destination 'generic/platform=macOS' -derivedDataPath build build
+  -destination 'generic/platform=macOS' -derivedDataPath build \
+  -onlyUsePackageVersionsFromResolvedFile \
+  SESH_COMMIT="$(git rev-parse --short HEAD)" build
 
 APP=build/Build/Products/Release/Sesh.app
 PLIST="$APP/Contents/Info.plist"
 VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST")
 
-# Read off the built executable, not the build flags.
-built_archs=$(lipo -archs "$APP/Contents/MacOS/Sesh")
-for arch in $ARCHS; do
-  case " $built_archs " in
-    *" $arch "*) ;;
-    *) die "built executable is missing $arch (has: $built_archs)" ;;
-  esac
+# Read off the built executables, not the build flags.
+for exe in "$APP/Contents/MacOS/Sesh" "$APP/Contents/Helpers/sesh"; do
+  [ -x "$exe" ] || die "missing $exe"
+  built_archs=$(lipo -archs "$exe")
+  for arch in $ARCHS; do
+    case " $built_archs " in
+      *" $arch "*) ;;
+      *) die "$exe is missing $arch (has: $built_archs)" ;;
+    esac
+  done
 done
 
-# Inside out: each nested framework or dylib first, the app last, since the
+# Inside out: each nested framework, dylib, or helper (the sesh CLI) first, the app last, since the
 # app's seal records the signatures of what it contains. Re-signing without
 # --entitlements also drops Xcode's get-task-allow, which notarization refuses.
 sign() { codesign --force --timestamp --options runtime --sign "$SIGN_IDENTITY" "$1"; }
-for nested in "$APP"/Contents/Frameworks/*; do
+for nested in "$APP"/Contents/Frameworks/* "$APP"/Contents/Helpers/*; do
   if [ -e "$nested" ]; then sign "$nested"; fi
 done
 sign "$APP"

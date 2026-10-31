@@ -246,7 +246,7 @@ struct MenuBarView: View {
         // Enter opens in the terminal when possible; wildcard/pattern hosts
         // (no single connectable alias) fall back to copying the command.
         if member.isConnectable {
-            model.connect(entry)
+            connect(entry)
         } else {
             model.copyCommand(entry)
         }
@@ -290,7 +290,7 @@ struct MenuBarView: View {
                     if let memberEntry = model.entry(forAlias: member.alias, in: hosts) {
                         Menu(member.label) {
                             if member.isConnectable {
-                                Button("Connect") { model.connect(memberEntry) }
+                                Button("Connect") { connect(memberEntry) }
                             }
                             Button("Copy Command") { model.copyCommand(memberEntry) }
                         }
@@ -298,7 +298,7 @@ struct MenuBarView: View {
                 }
             } else if let defaultEntry {
                 if group.defaultMember.isConnectable {
-                    Button("Connect") { model.connect(defaultEntry) }
+                    Button("Connect") { connect(defaultEntry) }
                 }
                 Button("Copy Command") { model.copyCommand(defaultEntry) }
             }
@@ -327,7 +327,7 @@ struct MenuBarView: View {
                         if let memberEntry = model.entry(forAlias: member.alias, in: hosts) {
                             Menu(member.label) {
                                 if member.isConnectable {
-                                    Button("Connect") { model.connect(memberEntry) }
+                                    Button("Connect") { connect(memberEntry) }
                                 }
                                 Button("Copy") { model.copyCommand(memberEntry) }
                             }
@@ -357,7 +357,7 @@ struct MenuBarView: View {
 
             if group.defaultMember.isConnectable, let defaultEntry {
                 Button {
-                    model.connect(defaultEntry)
+                    connect(defaultEntry)
                 } label: {
                     Image(systemName: "terminal")
                 }
@@ -434,10 +434,18 @@ struct MenuBarView: View {
             .help("Open Sesh")
             if mode == .hosts {
                 Spacer()
-                Button { editHostsInWindow(.create) } label: {
+                Menu {
+                    Button("New Entry…") { editHostsInWindow(.create) }
+                    Button("Add from Text…") { editHostsInWindow(.bulkAdd) }
+                } label: {
                     Image(systemName: "plus")
+                } primaryAction: {
+                    editHostsInWindow(.create)
                 }
-                .help("New Hosts Entry")
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("New Hosts Entry, or open the menu to add several from text")
                 Spacer()
                 Button {
                     model.pendingShowHostsFile = true
@@ -447,6 +455,17 @@ struct MenuBarView: View {
                 }
                 .help("View /etc/hosts")
             }
+            Spacer()
+            Button { openArchiveInWindow(.importFile(archiveKind)) } label: {
+                Image(systemName: "square.and.arrow.down")
+            }
+            .help(mode == .hosts ? "Import hosts-file entries from an export file"
+                                 : "Import SSH hosts from an export file")
+            Spacer()
+            Button { openArchiveInWindow(.export(archiveKind)) } label: {
+                Image(systemName: "square.and.arrow.up")
+            }
+            .help(mode == .hosts ? "Export hosts-file entries to a file" : "Export SSH hosts to a file")
             Spacer()
             Button { openSettings() } label: {
                 Image(systemName: "gearshape")
@@ -483,6 +502,12 @@ struct MenuBarView: View {
         dismiss()   // close the menu bar panel once the window is up
     }
 
+    /// Connects and closes the panel, so the terminal that opens has focus.
+    private func connect(_ entry: HostEntry) {
+        model.connect(entry)
+        dismiss()
+    }
+
     /// Opens the main window and asks it (via AppModel) to select this host and
     /// open its edit form.
     private func editInWindow(_ entry: HostEntry) {
@@ -493,6 +518,15 @@ struct MenuBarView: View {
     /// Opens the main window on the hosts-entry form (new or edit).
     private func editHostsInWindow(_ request: HostsEditRequest) {
         model.pendingHostsEdit = request
+        openMainWindow()
+    }
+
+    /// Export and import cover the tab being shown.
+    private var archiveKind: ArchiveKind { mode == .hosts ? .hostsFile : .sshHosts }
+
+    /// Opens the main window on an export sheet or the import file picker.
+    private func openArchiveInWindow(_ request: ArchiveRequest) {
+        model.pendingArchive = request
         openMainWindow()
     }
 

@@ -69,6 +69,19 @@ public struct HostFormModel: Equatable, Sendable {
         if rows.contains(where: { $0.user.trimmingCharacters(in: .whitespaces).isEmpty }) {
             return "Every credential row needs a user."
         }
+        // Each of these becomes a line of ~/.ssh/sesh.conf; a line break
+        // would start another, e.g. a `Match exec` that runs on every ssh.
+        if SSHOptionRules.hasLineBreak(displayName) || SSHOptionRules.hasLineBreak(hostName) {
+            return "The name and host can't contain line breaks."
+        }
+        for row in rows {
+            if [row.user, row.port, row.identityFile].contains(where: SSHOptionRules.hasLineBreak) {
+                return "Users, ports, and identity files can't contain line breaks."
+            }
+            if let extra = row.extras.first(where: { SSHOptionRules.hasLineBreak($0.key) || $0.values.contains(where: SSHOptionRules.hasLineBreak) }) {
+                return "The \(extra.key) option can't contain line breaks."
+            }
+        }
         return nil
     }
 }

@@ -13,6 +13,7 @@ struct HostsFileList: View {
     @Binding var search: String
     var searchFocused: FocusState<Bool>.Binding
     var onNew: () -> Void
+    var onBulkAdd: () -> Void
     var onEdit: (HostsFileEntry) -> Void
     var onDelete: (Set<UUID>) -> Void
 
@@ -24,11 +25,17 @@ struct HostsFileList: View {
                 TextField("Search hosts file", text: $search)
                     .textFieldStyle(.roundedBorder)
                     .focused(searchFocused)
-                Button { onNew() } label: {
+                Menu {
+                    Button("New Entry…") { onNew() }
+                    Button("Add from Text…") { onBulkAdd() }
+                } label: {
                     Image(systemName: "plus")
+                } primaryAction: {
+                    onNew()
                 }
-                .buttonStyle(.borderless)
-                .help("New Hosts Entry")
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("New Hosts Entry, or open the menu to add several from text")
                 Button(role: .destructive) {
                     onDelete(selection)
                 } label: {

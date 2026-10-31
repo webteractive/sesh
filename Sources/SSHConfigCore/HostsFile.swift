@@ -20,6 +20,12 @@ public struct HostsLine: Equatable, Sendable {
         self.isEnabled = isEnabled
     }
 
+    /// What makes two lines the same mapping, whatever their state or note:
+    /// the IP plus the lowercased hostnames.
+    public var mappingKey: String {
+        ip + " " + hostnames.map { $0.lowercased() }.joined(separator: " ")
+    }
+
     public var rendered: String {
         var line = (isEnabled ? "" : "# ") + ip + " " + hostnames.joined(separator: " ")
         if let note, !note.isEmpty { line += " # " + note }
@@ -34,6 +40,16 @@ public struct HostsImportMerge<ID: Hashable> {
     public var disable: Set<ID> = []
     public var added: [HostsLine] = []
     public var skipped = 0
+
+    public init() {}
+}
+
+/// What `HostsFile.parseBulk` read from pasted text.
+public struct HostsBulkParse: Sendable {
+    public var lines: [HostsLine] = []
+    /// The 1-based source line of each entry in `lines`.
+    public var lineNumbers: [Int] = []
+    public var invalid: [(number: Int, text: String)] = []
 
     public init() {}
 }
@@ -108,6 +124,41 @@ public enum HostsFile {
         guard tokens.count >= 2, isValidIP(tokens[0]),
               tokens.dropFirst().allSatisfy(isValidHostname) else { return nil }
         return HostsLine(ip: tokens[0], hostnames: Array(tokens.dropFirst()), note: note, isEnabled: enabled)
+    }
+
+    /// Parses pasted text for bulk add: one mapping per line, in the same
+    /// `IP host…[ # note]` form, with commented-out mappings coming in
+    /// disabled. Blank lines and prose comments are skipped; any other line
+    /// that doesn't parse is returned in `invalid` with its 1-based number.
+    public static func parseBulk(_ text: String) -> HostsBulkParse {
+        var parsed = HostsBulkParse()
+        for (index, row) in bulkRows(text).enumerated() {
+            let text = trimmed(row)
+            if let line = parseLine(text) {
+                parsed.lines.append(line)
+                parsed.lineNumbers.append(index + 1)
+            } else if !text.isEmpty && !text.hasPrefix("#") {
+                parsed.invalid.append((index + 1, text))
+            }
+        }
+        return parsed
+    }
+
+    /// Bulk-add text with line `number` (1-based, as `parseBulk` counts)
+    /// switched on or off by uncommenting or commenting it out, so the text
+    /// stays the one place the sheet's state lives.
+    public static func settingBulkLine(_ number: Int, enabled: Bool, in text: String) -> String {
+        var rows = bulkRows(text)
+        guard rows.indices.contains(number - 1) else { return text }
+        let row = trimmed(rows[number - 1])
+        if enabled {
+            guard row.hasPrefix("#") else { return text }
+            rows[number - 1] = trimmed(String(row.dropFirst()))
+        } else {
+            guard !row.hasPrefix("#") else { return text }
+            rows[number - 1] = "# " + row
+        }
+        return rows.joined(separator: "\n")
     }
 
     /// Lines import would adopt — enabled and commented-out mappings outside
@@ -189,6 +240,16 @@ public enum HostsFile {
             .map(\.id))
     }
 
+    /// A hostname (lowercased) that two of `entries` both map, or nil when
+    /// none is shared — those entries can't all be enabled at once.
+    public static func sharedHostname(in entries: [[String]]) -> String? {
+        var seen = Set<String>()
+        for names in entries {
+            for name in Set(names.map { $0.lowercased() }) where !seen.insert(name).inserted { return name }
+        }
+        return nil
+    }
+
     /// Folds lines found in the file (`candidates`, in file order) into the
     /// store's entries without changing what any hostname resolves to: the
     /// first enabled line for a name stays live, as the resolver would pick
@@ -244,20 +305,53 @@ public enum HostsFile {
     /// lands in a root-owned mktemp file beside the target, gets root:wheel
     /// 0644, and is renamed over it, so the live file is never truncated. DNS
     /// flush failures don't fail the script — the file has already landed.
-    public static func privilegedWriteScript(stagedPath: String, targetPath: String, ownerUID: UInt32) -> String {
+    /// `prompt`, when given, is shown in the password dialog so the user
+    /// sees what they're approving (see `changeSummary`).
+    public static func privilegedWriteScript(stagedPath: String, targetPath: String, ownerUID: UInt32,
+                                             prompt: String? = nil) -> String {
         func literal(_ s: String) -> String {
-            "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
+            "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+                .replacingOccurrences(of: "\n", with: "\\n") + "\""
         }
         return """
-        set p to quoted form of \(literal(stagedPath))
+        \(prompt.map { "set pr to \(literal($0))\n" } ?? "")set p to quoted form of \(literal(stagedPath))
         set m to quoted form of \(literal(targetPath + ".sesh-XXXXXX"))
         set t to quoted form of \(literal(targetPath))
         do shell script "exec 3< " & p & " && [ -f /dev/fd/3 ] && [ $(/usr/bin/stat -f %u /dev/fd/3) = \(ownerUID) ] && \
         [ -s /dev/fd/3 ] && n=$(/usr/bin/mktemp " & m & ") && { /bin/cat <&3 > $n && /usr/sbin/chown root:wheel $n && \
         /bin/chmod 0644 $n && /bin/mv -f $n " & t & " || { /bin/rm -f $n; false; }; } && \
         (/usr/bin/dscacheutil -flushcache; /usr/bin/killall -HUP mDNSResponder; true)" \
-        with administrator privileges
+        \(prompt == nil ? "" : "with prompt pr ")with administrator privileges
         """
+    }
+
+    /// What replacing `old` with `new` changes, for the password prompt:
+    /// "Sesh wants to change /etc/hosts:" and the lines that appear (+) and
+    /// disappear (−), up to `limit` of them.
+    public static func changeSummary(from old: String, to new: String, limit: Int = 8) -> String {
+        func lines(_ text: String) -> [String] {
+            text.components(separatedBy: .newlines)
+                .map { line in
+                    let printable = String(line.unicodeScalars.filter { $0.properties.generalCategory != .control })
+                    let trimmed = printable.trimmingCharacters(in: .whitespaces)
+                    return trimmed.count > 70 ? trimmed.prefix(69) + "…" : trimmed
+                }
+                .filter { !$0.isEmpty }
+        }
+        var remaining = Dictionary(lines(old).map { ($0, 1) }, uniquingKeysWith: +)
+        var changes: [String] = []
+        for line in lines(new) {
+            if let count = remaining[line], count > 0 { remaining[line] = count - 1 } else { changes.append("+ " + line) }
+        }
+        for line in lines(old) where (remaining[line] ?? 0) > 0 {
+            remaining[line]! -= 1
+            changes.append("− " + line)
+        }
+        var summary = "Sesh wants to change /etc/hosts:"
+        if changes.isEmpty { return summary + " no lines change, only their layout." }
+        summary += "\n\n" + changes.prefix(limit).joined(separator: "\n")
+        if changes.count > limit { summary += "\n…and \(changes.count - limit) more." }
+        return summary
     }
 
     public static func isValidIP(_ s: String) -> Bool {
@@ -275,13 +369,19 @@ public enum HostsFile {
         text.components(separatedBy: "\n")
     }
 
+    /// Pasted text can carry CRLF line ends, which Swift treats as one
+    /// newline character.
+    private static func bulkRows(_ text: String) -> [String] {
+        text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
+    }
+
     private static func trimmed(_ s: String) -> String {
         s.trimmingCharacters(in: .whitespaces)
     }
 
-    /// Identity `mergeImport` matches on: the IP plus lowercased hostnames.
+    /// Identity `mergeImport` matches on.
     private static func importKey(_ line: HostsLine) -> String {
-        line.ip + " " + line.hostnames.map { $0.lowercased() }.joined(separator: " ")
+        line.mappingKey
     }
 
     /// Index range of Sesh's block (markers included), nil when absent.

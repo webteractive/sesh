@@ -87,3 +87,14 @@ func makeContext() throws -> ModelContext {
     form.port = "22"
     #expect(form.validationError(existingHosts: []) == nil)
 }
+
+@MainActor @Test func editingAnAddedProfileKeepsTheHostsName() {
+    let web = HostEntry(host: "web", properties: [SSHProperty(key: "HostName", values: ["1.2.3.4"])], rawBlock: nil)
+    web.groupName = "web"; web.isDefaultProfile = true; web.displayName = "Web"
+    // Profiles added later carry no display name of their own.
+    let deploy = HostEntry(host: "web-deploy", properties: [SSHProperty(key: "User", values: ["deploy"])], rawBlock: nil)
+    deploy.groupName = "web"
+    let form = HostFormModel(editing: deploy, allHosts: [deploy, web])
+    #expect(form.displayName == "Web")
+    #expect(form.rows.map(\.user) == ["", "deploy"])
+}

@@ -30,9 +30,18 @@ final class AppModel {
     static let managedPathKey = "managedConfigPath"
     static let lastSelectedAliasKey = "lastSelectedAlias"
 
+    /// Backed by UserDefaults, so it reports its reads and writes to
+    /// Observation itself; otherwise a Picker bound to it never redraws.
     var preferredTerminalId: String {
-        get { UserDefaults.standard.string(forKey: Self.preferredTerminalKey) ?? "" }
-        set { UserDefaults.standard.set(newValue, forKey: Self.preferredTerminalKey) }
+        get {
+            access(keyPath: \.preferredTerminalId)
+            return UserDefaults.standard.string(forKey: Self.preferredTerminalKey) ?? ""
+        }
+        set {
+            withMutation(keyPath: \.preferredTerminalId) {
+                UserDefaults.standard.set(newValue, forKey: Self.preferredTerminalKey)
+            }
+        }
     }
 
     /// Alias of the host last shown in the main window, so reopening the window
@@ -177,7 +186,12 @@ final class AppModel {
     /// sheet; the window consumes and clears it.
     var pendingShowHostsFile = false
 
+    /// Set by the menu bar to ask the main window to open an export sheet
+    /// or the import file picker; the window consumes and clears it.
+    var pendingArchive: ArchiveRequest?
+
     @ObservationIgnored let hostsWriter = HostsFileWriter()
+    @ObservationIgnored private let controlServer = ControlServer()
 
     var pendingError: String?
     var showFirstRun = false
@@ -193,6 +207,13 @@ final class AppModel {
         // Detect terminals up front so the menu bar can connect before the
         // main window is ever opened (this is a menu-bar-first app).
         refreshTerminals()
+        // Here, not in onLaunch: that waits for a window, and the CLI mustn't.
+        controlServer.start { [weak self] command in
+            guard let self else { throw ControlFailure(.failed, "Sesh is quitting.") }
+            let warnings = CommandWarnings()
+            let result = try await CommandWarnings.$current.withValue(warnings) { try await self.handle(command) }
+            return (result, warnings.messages)
+        }
     }
 
     private static let legacyBundleId = "co.webteractive.sshconfig"
@@ -216,9 +237,14 @@ final class AppModel {
 
     /// Window appearance override: "system", "light", or "dark".
     var appearancePreference: String {
-        get { UserDefaults.standard.string(forKey: Self.appearanceKey) ?? "system" }
+        get {
+            access(keyPath: \.appearancePreference)
+            return UserDefaults.standard.string(forKey: Self.appearanceKey) ?? "system"
+        }
         set {
-            UserDefaults.standard.set(newValue, forKey: Self.appearanceKey)
+            withMutation(keyPath: \.appearancePreference) {
+                UserDefaults.standard.set(newValue, forKey: Self.appearanceKey)
+            }
             applyAppearance()
         }
     }
@@ -238,9 +264,11 @@ final class AppModel {
     /// left intact so the managed include isn't silently broken.
     func resetPreferences() {
         let defaults = UserDefaults.standard
-        for key in [Self.preferredTerminalKey, Self.appearanceKey, Self.lastSelectedAliasKey, Self.managedPathKey] {
+        for key in [Self.lastSelectedAliasKey, Self.managedPathKey] {
             defaults.removeObject(forKey: key)
         }
+        withMutation(keyPath: \.preferredTerminalId) { defaults.removeObject(forKey: Self.preferredTerminalKey) }
+        withMutation(keyPath: \.appearancePreference) { defaults.removeObject(forKey: Self.appearanceKey) }
         applyAppearance()
         refreshTerminals()
     }
@@ -287,8 +315,23 @@ final class AppModel {
     }
 
     /// Renders the whole store to the managed file and ensures the Include.
-    /// Store is the source of truth, so failures only warn (file is rebuildable).
-    func exportNow() {
+    /// Store is the source of truth, so failures only warn (file is
+    /// rebuildable): in the window's alert, or to the `sesh` command that
+    /// caused the change. Returns the failure, or nil.
+    @discardableResult
+    func exportNow() -> String? {
+        guard let problem = writeManagedFile() else { return nil }
+        if let warnings = CommandWarnings.current {
+            warnings.messages.append("The change was saved, but \(managedPath) wasn't updated: \(problem)")
+        } else {
+            pendingError = "Export failed: \(problem)"
+        }
+        return problem
+    }
+
+    /// Writes the managed file and ensures the Include; returns why it
+    /// couldn't, or nil.
+    func writeManagedFile() -> String? {
         // Defense-in-depth: if the managed path somehow aliases the real
         // config (e.g. a stray/mistyped Settings entry), refuse to export —
         // exporter.write would overwrite the user's actual ~/.ssh/config
@@ -297,16 +340,16 @@ final class AppModel {
         let expandedManaged = (managedPath as NSString).expandingTildeInPath
         let expandedConfig = ((configPath ?? ConfigPathStore.defaultSuggestion) as NSString).expandingTildeInPath
         guard expandedManaged != expandedConfig else {
-            pendingError = "Managed file path can't be your main ~/.ssh/config."
-            return
+            return "Managed file path can't be your main ~/.ssh/config."
         }
         do {
             let entries = try context.fetch(FetchDescriptor<HostEntry>(sortBy: [SortDescriptor(\.createdAt)]))
                 .map { RenderableHost(host: $0.host, properties: $0.properties) }
             try exporter.write(entries, toPath: managedPath)
             try includeManager.ensureInclude(managedPath: managedPath, configPath: configPath ?? ConfigPathStore.defaultSuggestion)
+            return nil
         } catch {
-            pendingError = "Export failed: \(error.localizedDescription)"
+            return error.localizedDescription
         }
     }
 
@@ -606,11 +649,55 @@ final class AppModel {
         }
     }
 
+    /// Copies `entry` (one alias, not its group) under a free "-copy-N"
+    /// alias, as Laravel's DuplicateSshConfigAction does, then exports.
+    func duplicateHost(_ entry: HostEntry) throws -> HostEntry {
+        let existing = sshAliases
+        var newHost = entry.host
+        var counter = 1
+        while existing.contains(newHost) {
+            newHost = "\(entry.host)-copy-\(counter)"
+            counter += 1
+        }
+        let duplicated = HostEntry(host: newHost, properties: entry.properties, rawBlock: nil)
+        duplicated.displayName = entry.displayName
+        duplicated.workspaceID = entry.workspaceID
+        context.insert(duplicated)
+        do {
+            try context.save()
+        } catch {
+            context.rollback()
+            throw error
+        }
+        exportNow()
+        return duplicated
+    }
+
+    /// Deletes every member of the logical hosts with these group keys, then
+    /// exports. Returns how many aliases went.
+    @discardableResult
+    func deleteHosts(groupKeys: Set<String>) throws -> Int {
+        let all = (try? context.fetch(FetchDescriptor<HostEntry>())) ?? []
+        let entries = all.filter { groupKeys.contains($0.groupName ?? $0.host) }
+        for entry in entries { context.delete(entry) }
+        do {
+            try context.save()
+        } catch {
+            context.rollback()
+            throw error
+        }
+        exportNow()
+        return entries.count
+    }
+
     /// Creates a sibling profile under `base`'s group (sharing `groupName`,
     /// defaulting it to `base.host` and marking `base` the default when it had
     /// no group yet). Returns an error message, or nil on success.
     func addProfile(to base: HostEntry, label: String, user: String,
                     identityFile: String?, allHosts: [HostEntry]) -> String? {
+        if [label, user, identityFile ?? ""].contains(where: SSHOptionRules.hasLineBreak) {
+            return "The label, user, and identity file can't contain line breaks."
+        }
         let group = base.groupName ?? base.host
         let profile = ProfileFactory.make(
             baseProperties: base.properties, baseAlias: base.host, label: label,
@@ -706,4 +793,13 @@ final class AppModel {
         }
         return text
     }
+}
+
+/// What a `sesh` command should hear about besides its result, collected
+/// while it runs (see `exportNow`). Task-local, so commands that overlap at
+/// an await don't mix up their warnings.
+@MainActor
+final class CommandWarnings {
+    @TaskLocal static var current: CommandWarnings?
+    var messages: [String] = []
 }

@@ -75,7 +75,7 @@ struct HostFormSheet: View {
         .frame(width: 520, height: 560)
         .onAppear {
             if case .edit(let entry) = mode {
-                form = Self.buildForm(for: entry, allHosts: hosts)
+                form = HostFormModel(editing: entry, allHosts: hosts)
             }
         }
     }
@@ -125,30 +125,5 @@ struct HostFormSheet: View {
         } else {
             dismiss()
         }
-    }
-
-    /// Builds a `HostFormModel` from `entry`'s whole group: the display name
-    /// (falling back to the alias), `HostName` from the default member, and
-    /// one `CredentialRow` per member (user/port/identityFile plus any other
-    /// properties preserved as extras). Singleton (ungrouped) entries yield a
-    /// single-row form.
-    private static func buildForm(for entry: HostEntry, allHosts: [HostEntry]) -> HostFormModel {
-        let members = entry.groupName.map { group in allHosts.filter { $0.groupName == group } } ?? [entry]
-        let ordered = members.isEmpty ? [entry] : members
-        let defaultMember = ordered.first { $0.isDefaultProfile } ?? ordered[0]
-        let rest = ordered
-            .filter { $0.persistentModelID != defaultMember.persistentModelID }
-            .sorted { $0.host < $1.host }
-        let orderedMembers = [defaultMember] + rest
-
-        let rows = orderedMembers.map { member -> CredentialRow in
-            CredentialRow(fromProperties: member.properties)
-        }
-
-        return HostFormModel(
-            displayName: entry.displayName ?? entry.host,
-            hostName: defaultMember.properties.first("HostName") ?? "",
-            rows: rows,
-            workspaceID: defaultMember.workspaceID)
     }
 }

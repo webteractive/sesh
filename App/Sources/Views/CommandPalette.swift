@@ -3,7 +3,7 @@ import SwiftData
 import SSHConfigCore
 
 enum PaletteAction: CaseIterable, Identifiable {
-    case newHost, importFromConfig, rawConfig, settings
+    case newHost, importFromConfig, exportSSHHosts, exportHostsFile, importSSHHosts, importHostsFile, rawConfig, settings
 
     var id: Self { self }
 
@@ -11,6 +11,10 @@ enum PaletteAction: CaseIterable, Identifiable {
         switch self {
         case .newHost: "New Host"
         case .importFromConfig: "Import from Config"
+        case .exportSSHHosts: "Export SSH Hosts…"
+        case .exportHostsFile: "Export Hosts File…"
+        case .importSSHHosts: "Import SSH Hosts from File…"
+        case .importHostsFile: "Import Hosts File Entries from File…"
         case .rawConfig: "Raw Config"
         case .settings: "Settings"
         }
@@ -20,6 +24,8 @@ enum PaletteAction: CaseIterable, Identifiable {
         switch self {
         case .newHost: "plus"
         case .importFromConfig: "square.and.arrow.down"
+        case .exportSSHHosts, .exportHostsFile: "square.and.arrow.up"
+        case .importSSHHosts, .importHostsFile: "square.and.arrow.down.on.square"
         case .rawConfig: "doc.plaintext"
         case .settings: "gearshape"
         }

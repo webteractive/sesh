@@ -248,3 +248,67 @@ private let aLive = HostsLine(ip: "1.2.3.4", hostnames: ["a.test"])
     #expect(script.contains("/bin/mv -f $n "))
     #expect(!script.contains("> /private/etc/hosts"))   // never truncate the live file in place
 }
+
+// MARK: - Bulk add
+
+@Test func parseBulkReadsPastedLines() {
+    let text = """
+    159.223.147.75 sub.allaboutcircuits.com
+    159.223.147.75 www.allaboutcircuits.com \r
+    # staging pins
+
+    # 10.0.0.5 staging.test # off for now
+    ::1 v6.test\tother.test
+    """
+    let parsed = HostsFile.parseBulk(text)
+    #expect(parsed.lines == [
+        HostsLine(ip: "159.223.147.75", hostnames: ["sub.allaboutcircuits.com"]),
+        HostsLine(ip: "159.223.147.75", hostnames: ["www.allaboutcircuits.com"]),
+        HostsLine(ip: "10.0.0.5", hostnames: ["staging.test"], note: "off for now", isEnabled: false),
+        HostsLine(ip: "::1", hostnames: ["v6.test", "other.test"]),
+    ])
+    #expect(parsed.invalid.isEmpty)
+}
+
+@Test func parseBulkReportsBadLinesByNumber() {
+    let parsed = HostsFile.parseBulk("1.2.3.4 a.test\n\n999.1.1.1 b.test\nc.test\n1.2.3.4 bad/name")
+    #expect(parsed.lines == [aLive])
+    #expect(parsed.invalid.map(\.number) == [3, 4, 5])
+    #expect(parsed.invalid.first?.text == "999.1.1.1 b.test")
+}
+
+@Test func parseBulkNumbersEachEntryBySourceLine() {
+    let parsed = HostsFile.parseBulk("# pins\n1.2.3.4 a.test\n\n# 5.6.7.8 b.test")
+    #expect(parsed.lineNumbers == [2, 4])
+}
+
+@Test func settingBulkLineCommentsAndUncommentsOneLine() {
+    let text = "1.2.3.4 a.test\n#5.6.7.8 b.test # later\n9.9.9.9 c.test"
+    let off = HostsFile.settingBulkLine(1, enabled: false, in: text)
+    #expect(off == "# 1.2.3.4 a.test\n#5.6.7.8 b.test # later\n9.9.9.9 c.test")
+    let on = HostsFile.settingBulkLine(2, enabled: true, in: off)
+    #expect(on == "# 1.2.3.4 a.test\n5.6.7.8 b.test # later\n9.9.9.9 c.test")
+    #expect(HostsFile.parseBulk(on).lines.map(\.isEnabled) == [false, true, true])
+    #expect(HostsFile.settingBulkLine(3, enabled: true, in: text) == text)   // already on
+    #expect(HostsFile.settingBulkLine(9, enabled: false, in: text) == text)  // no such line
+}
+
+@Test func passwordPromptSaysWhatChanges() {
+    let old = "127.0.0.1 localhost\n# >>> Sesh\n10.0.0.5 api.test\n# <<< Sesh\n"
+    let new = "127.0.0.1 localhost\n# >>> Sesh\n# 10.0.0.5 api.test\n6.6.6.6 github.com\n# <<< Sesh\n"
+    let summary = HostsFile.changeSummary(from: old, to: new)
+    #expect(summary == "Sesh wants to change /etc/hosts:\n\n+ # 10.0.0.5 api.test\n+ 6.6.6.6 github.com\n− 10.0.0.5 api.test")
+    let many = (1...12).map { "10.0.0.\($0) h\($0).test" }.joined(separator: "\n")
+    #expect(HostsFile.changeSummary(from: "", to: many).hasSuffix("\n…and 4 more."))
+
+    let script = HostsFile.privilegedWriteScript(stagedPath: "/tmp/x", targetPath: "/private/etc/hosts", ownerUID: 501,
+                                                 prompt: "Change:\n+ 1.2.3.4 \"q\"\\")
+    #expect(script.hasPrefix(#"set pr to "Change:\n+ 1.2.3.4 \"q\"\\""#))
+    #expect(script.hasSuffix("with prompt pr with administrator privileges"))
+}
+
+@Test func sharedHostnameFindsEntriesThatCantBothBeOn() {
+    #expect(HostsFile.sharedHostname(in: [["a.test", "b.test"], ["c.test"]]) == nil)
+    #expect(HostsFile.sharedHostname(in: [["a.test", "A.test"]]) == nil)
+    #expect(HostsFile.sharedHostname(in: [["a.test"], ["c.test", "A.TEST"]]) == "a.test")
+}
