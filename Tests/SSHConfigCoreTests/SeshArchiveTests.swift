@@ -59,6 +59,34 @@ private func profile(_ alias: String, default isDefault: Bool = false) -> SeshAr
     #expect(web.riskyOptions.isEmpty)
 }
 
+@Test func riskyOptionsFlagsAnythingBeyondWhereAndAsWhom() {
+    let plain = SeshArchive.SSHHost(alias: "x", properties: [
+        SSHProperty(key: "HostName", values: ["a.test"]),
+        SSHProperty(key: "user", values: ["deploy"]),
+        SSHProperty(key: "Port", values: ["2222"]),
+        SSHProperty(key: "IdentityFile", values: ["~/.ssh/id_ed25519"]),
+        SSHProperty(key: "IdentitiesOnly", values: ["yes"]),
+        SSHProperty(key: "ServerAliveInterval", values: ["60"]),
+    ])
+    #expect(plain.riskyOptions.isEmpty)
+
+    // Ports, environment, server-side commands and host key aliasing were
+    // missed by the old list of named dangers.
+    let sneaky = SeshArchive.SSHHost(alias: "x", properties: [
+        SSHProperty(key: "RemoteForward", values: ["8080 localhost:80"]),
+        SSHProperty(key: "LocalForward", values: ["5432 db:5432"]),
+        SSHProperty(key: "DynamicForward", values: ["1080"]),
+        SSHProperty(key: "SendEnv", values: ["AWS_*"]),
+        SSHProperty(key: "SetEnv", values: ["X=1"]),
+        SSHProperty(key: "RemoteCommand", values: ["rm -rf ~"]),
+        SSHProperty(key: "HostKeyAlias", values: ["github.com"]),
+        SSHProperty(key: "ControlPath", values: ["/tmp/%r"]),
+        SSHProperty(key: "ProxyJump", values: ["bastion"]),
+    ])
+    #expect(sneaky.riskyOptions == sneaky.properties.map(\.key))
+    #expect(SeshArchive.risks(of: [sneaky], configAliases: []).first?.hasPrefix("sets ") == true)
+}
+
 @Test func patternAndMultiAliasesCantTravel() {
     for alias in ["*", "*.example.com", "!prod", "web?", "a b", "x\ty", "\"q\"", "a,b"] {
         #expect(SeshArchive.SSHHost(alias: alias, properties: []).problem != nil, "\(alias)")

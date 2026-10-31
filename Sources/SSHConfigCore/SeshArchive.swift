@@ -58,18 +58,26 @@ public struct SeshArchive: Codable, Equatable, Sendable {
         /// One logical host: profiles share their group, a lone host is its own.
         public var groupKey: String { groupName ?? alias }
 
-        /// Options that make ssh run a local command or load a library when
-        /// connecting, or loosen what it checks and shares: host key checks,
-        /// agent and X11 forwarding. A file from someone else carrying one
-        /// deserves a look before it lands in ~/.ssh/sesh.conf.
+        /// Options that only say where to connect, as whom, and how
+        /// patiently. Anything else from someone else's file deserves a look
+        /// before it lands in ~/.ssh/sesh.conf: some run a command, locally
+        /// (ProxyCommand) or on the server (RemoteCommand), some open ports
+        /// or send your environment (RemoteForward, SendEnv), some loosen
+        /// host key checks (StrictHostKeyChecking, HostKeyAlias). It's an
+        /// allowlist because a list of dangerous options misses whichever of
+        /// ssh's many options it didn't name.
+        static let plainOptions: Set<String> = [
+            "hostname", "user", "port", "identityfile", "identitiesonly", "certificatefile",
+            "addkeystoagent", "usekeychain",
+            "serveraliveinterval", "serveralivecountmax", "connecttimeout", "connectionattempts", "tcpkeepalive",
+            "compression", "loglevel", "requesttty", "addressfamily", "ipqos", "batchmode",
+            "preferredauthentications", "pubkeyauthentication", "passwordauthentication",
+            "kbdinteractiveauthentication", "numberofpasswordprompts", "visualhostkey", "escapechar",
+        ]
+
+        /// The options beyond `plainOptions`, as written.
         public var riskyOptions: [String] {
-            let risky: Set<String> = [
-                "proxycommand", "localcommand", "permitlocalcommand", "knownhostscommand",
-                "pkcs11provider", "securitykeyprovider", "xauthlocation",
-                "stricthostkeychecking", "userknownhostsfile", "globalknownhostsfile", "identityagent",
-                "forwardagent", "forwardx11", "forwardx11trusted",
-            ]
-            return properties.map(\.key).filter { risky.contains($0.lowercased()) }
+            properties.map(\.key).filter { !Self.plainOptions.contains($0.lowercased()) }
         }
     }
 

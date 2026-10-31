@@ -125,9 +125,11 @@ struct Import: ParsableCommand {
         discussion: """
         Imports everything in the file Sesh doesn't already have: SSH hosts by alias, \
         hosts-file entries by IP and hostnames. Risky SSH hosts are left out unless you \
-        pass --allow-risky: ones with options that run a local command when you connect \
-        (ProxyCommand, LocalCommand, …) or loosen what ssh checks and shares \
-        (StrictHostKeyChecking, UserKnownHostsFile, ForwardAgent, …), ones that would \
+        pass --allow-risky: ones that set any option beyond where to connect, as whom \
+        and how patiently (HostName, User, Port, IdentityFile, ServerAliveInterval, …), \
+        since others run commands (ProxyCommand, RemoteCommand), open ports or send \
+        your environment (RemoteForward, SendEnv), or loosen host key checks \
+        (StrictHostKeyChecking, HostKeyAlias); ones that would \
         replace a host in your ~/.ssh/config, and ones named like a real server \
         (github.com) whose HostName points elsewhere. Hosts-file entries go in first, behind one password prompt, so \
         cancelling it imports nothing.

@@ -48,8 +48,11 @@ entries. **The app is the source of truth**: you manage hosts in Sesh, and it ex
   whole; hosts that are only in `~/.ssh/config` get their own group, unticked.
   Import lists a file's items the same way: anything Sesh already has is shown
   but skipped, and risky SSH hosts start unticked with a warning: ones that
-  run a local command on connect (`ProxyCommand`, `LocalCommand`, …), loosen
-  what ssh checks and shares (`StrictHostKeyChecking`, `ForwardAgent`, …),
+  set any option beyond where to connect, as whom and how patiently (`User`,
+  `Port`, `IdentityFile`, `ServerAliveInterval`, …), since others run
+  commands (`ProxyCommand`, `RemoteCommand`), open ports or send your
+  environment (`RemoteForward`, `SendEnv`), or loosen host key checks
+  (`StrictHostKeyChecking`, `HostKeyAlias`); ones that
   would replace a host in your `~/.ssh/config`, or are named like a real
   server (`github.com`) with `HostName` pointing elsewhere. A host whose alias
   is a pattern, like `Host *`, isn't imported at all. Hosts-file entries
